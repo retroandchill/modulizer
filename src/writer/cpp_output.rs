@@ -18,7 +18,7 @@ impl Config {
         }
 
         let preprocessed = preprocess(&includes, self.headers.include_dirs.as_slice())?;
-        println!("Preprocessed includes:\n{}", preprocessed);
+        println!("Preprocessed includes:\n{}", preprocessed.source);
 
         writer.write_all(b"module;\n\n")?;
         writer.write_all(includes.as_bytes())?;
