@@ -3,13 +3,20 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Default)]
 pub struct FileConfig {
-    pub(crate) module: FileModuleConfig
+    pub module: FileModuleConfig,
+    pub headers: FileHeaderConfig,
 }
 
 #[derive(Debug, Deserialize, Default)]
 pub struct FileModuleConfig {
     pub name: Option<String>,
     pub output: Option<PathBuf>
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct FileHeaderConfig {
+    pub library_headers: Vec<PathBuf>,
+    pub include_dirs: Vec<PathBuf>
 }
 
 impl FileConfig {

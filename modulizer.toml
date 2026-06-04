@@ -1,0 +1,8 @@
+[module]
+name = "fmt"
+
+[headers]
+include_dirs = [
+    "samples/fmt/include"
+]
+library_headers = ["fmt/format.h"]
