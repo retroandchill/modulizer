@@ -1,11 +1,11 @@
-use crate::config::config::Config;
+use crate::config::Config;
 
 pub mod config;
+pub mod writer;
 
 fn main() -> anyhow::Result<()> {
     let config = Config::load_from_args()?;
-
-    println!("{config:#?}");
+    config.output_module()?;
 
     Ok(())
 }
