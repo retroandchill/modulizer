@@ -151,6 +151,13 @@ pub fn parse_tokens(lexemes: Vec<Lexeme>) -> Vec<PreprocessorToken> {
         }
     }
 
+    if !current_line.is_empty() {
+        tokens.push(PreprocessorToken{
+            original: current_line,
+            kind: PreprocessorTokenKind::Text,
+        });
+    }
+
     tokens
 }
 
