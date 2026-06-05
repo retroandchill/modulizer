@@ -11,7 +11,7 @@ pub enum Lexeme {
     NewLine,
     LineComment(String),
     BlockComment(String),
-    Backslash,
+    Slash,
     
     Hash,
     
@@ -34,6 +34,10 @@ pub enum Lexeme {
     GreaterEqual,
     LessEqual,
     NotEqual,
+
+    Not,
+    And,
+    Or,
     
     Other(String)
 }
@@ -43,6 +47,13 @@ pub fn lex(source: &str) -> Vec<Lexeme> {
     let mut lexemes = Vec::new();
     
     while let Some(lexeme) = lexer.next_lexeme() {
+        if let Lexeme::Other(ref to_append) = lexeme {
+            if let Some(Lexeme::Other(string)) = lexemes.last_mut() {
+                string.push_str(to_append);
+                continue;
+            }
+        }
+
         lexemes.push(lexeme);
     }
     
@@ -60,7 +71,7 @@ impl Lexeme {
             | Lexeme::BlockComment(value)
             | Lexeme::Other(value) => value,
             Lexeme::NewLine => "\n",
-            Lexeme::Backslash => "/",
+            Lexeme::Slash => "\\",
             Lexeme::Hash => "#",
             Lexeme::LParen => "(",
             Lexeme::RParen => ")",
@@ -76,7 +87,10 @@ impl Lexeme {
             Lexeme::DoubleEqual => "==",
             Lexeme::GreaterEqual => ">=",
             Lexeme::LessEqual => "<=",
-            Lexeme::NotEqual => "!="
+            Lexeme::NotEqual => "!=",
+            Lexeme::And => "&&",
+            Lexeme::Or => "||",
+            Lexeme::Not => "!",
         }
     }
 }

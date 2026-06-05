@@ -65,7 +65,7 @@ impl<'a> Lexer<'a> {
             }
             '\\' => {
                 self.advance_char();
-                Some(Lexeme::Backslash)
+                Some(Lexeme::Slash)
             }
             '(' => {
                 self.advance_char();
@@ -122,6 +122,18 @@ impl<'a> Lexer<'a> {
             '!' if self.starts_with("!=") => {
                 self.position += 2;
                 Some(Lexeme::NotEqual)
+            }
+            '!' => {
+                self.advance_char();
+                Some(Lexeme::Not)
+            }
+            '&' if self.starts_with("&&") => {
+                self.position += 2;
+                Some(Lexeme::And)
+            }
+            '|' if self.starts_with("||") => {
+                self.position += 2;
+                Some(Lexeme::Or)
             }
             '=' => {
                 self.advance_char();

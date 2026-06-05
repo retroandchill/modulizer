@@ -105,7 +105,7 @@ pub fn parse_tokens(lexemes: Vec<Lexeme>) -> Vec<PreprocessorToken> {
             non_whitespace_on_line = false;
         }
 
-        if *current == Lexeme::Backslash {
+        if *current == Lexeme::Slash {
             last_char_was_backslash = true;
         }
         else {
@@ -166,7 +166,7 @@ fn get_full_line(lexemes: &[Lexeme], position: &mut usize) -> Vec<Lexeme> {
     let mut line = Vec::new();
 
     while let Some(current) = lexemes.get(*position) {
-        if matches!(current, Lexeme::NewLine) && !matches!(line.last(), Some(Lexeme::Backslash)) && seen_non_trivial {
+        if matches!(current, Lexeme::NewLine) && !matches!(line.last(), Some(Lexeme::Slash)) && seen_non_trivial {
             break;
         }
 
@@ -348,7 +348,7 @@ fn parse_define_directive(line: Vec<Lexeme>, position: usize) -> PreprocessorTok
 
 fn get_macro_replacement(line: &[Lexeme], position: usize) -> Vec<Lexeme> {
     trim_trivial(&line[position..]).iter()
-        .filter(|&lexeme| !matches!(lexeme, Lexeme::Backslash))
+        .filter(|&lexeme| !matches!(lexeme, Lexeme::Slash))
         .map(|lexeme| {
             match lexeme {
                 Lexeme::NewLine => Lexeme::Whitespace(" ".to_string()),
