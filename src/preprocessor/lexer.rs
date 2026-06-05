@@ -12,32 +12,38 @@ impl<'a> Lexer<'a> {
             position: 0,
         }
     }
-    
+
     pub fn next_lexeme(&mut self) -> Option<Lexeme> {
         let current = self.peek_char()?;
-        
+
+        // We want to skip \r characters, as they are often used in Windows line endings
+        if current == '\r' {
+            self.advance_char();
+            return self.next_lexeme();
+        }
+
         if current == '\n' {
             self.advance_char();
             return Some(Lexeme::NewLine);
         }
-        
+
         if current.is_whitespace() {
             return Some(Lexeme::Whitespace(self.take_while(|ch| {
                 ch.is_whitespace() && ch != '\n'
             })));
         }
-        
+
         if current == '/' {
             if self.starts_with("//") {
                 return Some(Lexeme::LineComment(self.take_until_newline()))
             }
-            
+
             if self.starts_with("/*") {
                 return Some(Lexeme::BlockComment(self.take_block_comment()))
             }
-            
+
             self.advance_char();
-            return Some(Lexeme::Slash);
+            return Some(Lexeme::Other(current.to_string()));
         }
 
         if current == '"' || self.starts_string_literal_prefix() {
@@ -56,6 +62,10 @@ impl<'a> Lexer<'a> {
             '#' => {
                 self.advance_char();
                 Some(Lexeme::Hash)
+            }
+            '\\' => {
+                self.advance_char();
+                Some(Lexeme::Backslash)
             }
             '(' => {
                 self.advance_char();
@@ -120,56 +130,56 @@ impl<'a> Lexer<'a> {
             _ => Some(Lexeme::Other(self.advance_char().to_string())),
         }
      }
-    
+
     fn peek_char(&self) -> Option<char> {
-        self.source.chars().nth(self.position)
+        self.source[self.position..].chars().next()
     }
-    
+
     fn advance_char(&mut self) -> char {
         let ch = self.peek_char().expect("advanced past end of source");
         self.position += ch.len_utf8();
         ch
-        
+
     }
-    
+
     fn starts_with(&self, value: &str) -> bool {
         self.source[self.position..].starts_with(value)
     }
-    
+
     fn take_while(&mut self, predicate: impl Fn(char) -> bool) -> String {
         let start = self.position;
-        
+
         while let Some(ch) = self.peek_char() {
             if !predicate(ch) {
                 break;
             }
-            
+
             self.advance_char();
         }
-        
+
         self.source[start..self.position].to_string()
     }
-    
+
     fn take_until_newline(&mut self) -> String {
         self.take_while(|ch| ch != '\n')
     }
-    
+
     fn take_block_comment(&mut self) -> String {
         let start = self.position;
         self.position += 2;
-        
+
         while self.position < self.source.len() {
             if self.starts_with("*/") {
                 self.position += 2;
                 break;
             }
-            
+
             self.advance_char();
         }
-        
+
         self.source[start..self.position].to_string()
     }
-    
+
     fn starts_string_literal_prefix(&self) -> bool {
         self.starts_with("u8\"")
             || self.starts_with("u\"")
@@ -181,7 +191,7 @@ impl<'a> Lexer<'a> {
             || self.starts_with("UR\"")
             || self.starts_with("LR\"")
     }
-    
+
     fn take_string_literal(&mut self) -> String {
         if let Some(raw_start) = self.source[self.position..].find("R\"") {
             let raw_position = self.position + raw_start;
@@ -201,23 +211,23 @@ impl<'a> Lexer<'a> {
 
         self.take_quoted_literal('"')
     }
-    
+
     fn take_quoted_literal(&mut self, quote: char) -> String {
         let start = self.position;
 
         self.advance_char();
-        
+
         while let Some(ch) = self.peek_char() {
             self.advance_char();
-            
+
             if ch == '\\' {
                 if self.peek_char().is_some() {
                     self.advance_char();
                 }
-                
+
                 continue;
             }
-            
+
             if ch == quote {
                 break;
             }
@@ -225,7 +235,7 @@ impl<'a> Lexer<'a> {
 
         self.source[start..self.position].to_string()
     }
-    
+
     fn take_raw_string_literal_from(&mut self, start: usize) -> String {
         let delimiter_start = self.position;
 
@@ -248,7 +258,7 @@ impl<'a> Lexer<'a> {
 
         self.source[start..self.position].to_string()
     }
-    
+
     fn take_integer_literal(&mut self) -> String {
         self.take_while(|ch| ch.is_ascii_alphanumeric() || ch == '\'' || ch == '_')
     }

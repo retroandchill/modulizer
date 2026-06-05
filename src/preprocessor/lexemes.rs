@@ -11,7 +11,7 @@ pub enum Lexeme {
     NewLine,
     LineComment(String),
     BlockComment(String),
-    Slash,
+    Backslash,
     
     Hash,
     
@@ -60,7 +60,7 @@ impl Lexeme {
             | Lexeme::BlockComment(value)
             | Lexeme::Other(value) => value,
             Lexeme::NewLine => "\n",
-            Lexeme::Slash => "/",
+            Lexeme::Backslash => "/",
             Lexeme::Hash => "#",
             Lexeme::LParen => "(",
             Lexeme::RParen => ")",
