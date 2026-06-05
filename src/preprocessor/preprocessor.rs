@@ -82,6 +82,7 @@ fn try_expand_include(
     match include.target {
         IncludeTarget::Angled(name) => {
             if let Some(header) = try_find_header(&name, include_paths, None) {
+                println!("Expanding angled header: {}", name);
                 tokenize_header(result, include_paths, header);
                 return;
             }
@@ -96,6 +97,7 @@ fn try_expand_include(
 
         IncludeTarget::Quoted(name) => {
             if let Some(header) = try_find_header(&name, include_paths, header_name.as_ref()) {
+                println!("Expanding quoted header: {}", name);
                 tokenize_header(result, include_paths, header);
                 return;
             }

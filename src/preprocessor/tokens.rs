@@ -536,7 +536,6 @@ fn parse_macro_candidate(lexemes: &[Lexeme], position: &mut usize, identifier: S
                 has_parameters = true;
             }
         }
-        *position += 1;
     }
 
     if paren_depth > 0 {
