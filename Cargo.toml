@@ -9,3 +9,5 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 anyhow = "1.0.102"
 itertools = "0.13"
+logos = "0.16.1"
+chumsky = "0.13.0"

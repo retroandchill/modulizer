@@ -1,7 +1,7 @@
 use std::fmt::Write as FmtWrite;
 use std::io::Write;
 use crate::config::Config;
-use crate::preprocessor::preprocess;
+use crate::parser::translation::TranslationUnit;
 use crate::writer::IndentedWriter;
 
 
@@ -14,12 +14,12 @@ impl Config {
 
         for header in &self.headers.library_headers {
             let header_file = header.display();
-            includes.write_fmt(format_args!("#include <{header_file}>;\n"))?;
+            includes.write_fmt(format_args!("#include <{header_file}>\n"))?;
         }
 
-        let preprocessed = preprocess(&includes, self)?;
+        let translation_unit = TranslationUnit::new(self, &includes)?;
         let mut expansion = std::fs::File::create("expanded.cpp")?;
-        expansion.write(preprocessed.source.as_bytes())?;
+        expansion.write_fmt(format_args!("{}", translation_unit))?;
 
         writer.write_all(b"module;\n\n")?;
         writer.write_all(includes.as_bytes())?;
