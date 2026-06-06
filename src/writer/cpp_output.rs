@@ -1,6 +1,6 @@
 use std::fmt::Write as FmtWrite;
 use std::io::Write;
-use crate::config::Config;
+use crate::config::{Config, ConfigIncludePath};
 use crate::parser::translation::TranslationUnit;
 use crate::writer::IndentedWriter;
 
@@ -13,8 +13,16 @@ impl Config {
         let mut includes = String::new();
 
         for header in &self.headers.library_headers {
-            let header_file = header.display();
-            includes.write_fmt(format_args!("#include <{header_file}>\n"))?;
+            match header {
+                ConfigIncludePath::Unconditional(file) => {
+                    let header_file = file.display();
+                    includes.write_fmt(format_args!("#include <{header_file}>\n"))?;
+                }
+                ConfigIncludePath::Conditional { path, if_defined } => {
+                    let header_file = path.display();
+                    includes.write_fmt(format_args!("#ifdef {if_defined}\n#include <{header_file}>\n#endif\n"))?;
+                }
+            }
         }
 
         let translation_unit = TranslationUnit::new(self, &includes)?;

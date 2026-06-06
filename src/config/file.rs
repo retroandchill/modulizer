@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use serde::Deserialize;
+use crate::config::config::ConfigIncludePath;
 
 #[derive(Debug, Deserialize, Default)]
 pub struct FileConfig {
@@ -20,7 +21,7 @@ pub struct FileModuleConfig {
 #[derive(Debug, Deserialize, Default)]
 pub struct FileHeaderConfig {
     #[serde(default)]
-    pub library_headers: Vec<PathBuf>,
+    pub library_headers: Vec<ConfigIncludePath>,
 
     #[serde(default)]
     pub include_dirs: Vec<PathBuf>

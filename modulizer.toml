@@ -5,7 +5,19 @@ name = "fmt"
 include_dirs = [
     "samples/fmt/include"
 ]
-library_headers = ["fmt/format.h"]
+library_headers = [
+    "fmt/args.h",
+    "fmt/chrono.h",
+    "fmt/color.h",
+    "fmt/compile.h",
+    "fmt/format.h",
+    { path = "fmt/os.h", if_defined = "FMT_OS" },
+    "fmt/ostream.h",
+    "fmt/printf.h",
+    "fmt/ranges.h",
+    "fmt/std.h",
+    "fmt/xchar.h"
+]
 
 [macros]
 expand_from_definition = [

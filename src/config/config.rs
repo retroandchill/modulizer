@@ -4,6 +4,7 @@ use crate::config::file::FileConfig;
 use clap::Parser;
 use itertools::Itertools;
 use std::path::PathBuf;
+use serde::Deserialize;
 
 #[derive(Debug)]
 pub struct Config {
@@ -18,9 +19,28 @@ pub struct ModuleConfig {
     pub output_path: PathBuf,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum ConfigIncludePath {
+    Unconditional(PathBuf),
+    Conditional {
+        path: PathBuf,
+        if_defined: String,
+    },
+}
+
+impl ConfigIncludePath {
+    pub fn path(&self) -> &PathBuf {
+        match self {
+            Self::Unconditional(path) => path,
+            Self::Conditional { path, .. } => path,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct HeaderConfig {
-    pub library_headers: Vec<PathBuf>,
+    pub library_headers: Vec<ConfigIncludePath>,
     pub include_dirs: Vec<PathBuf>,
 }
 
@@ -38,6 +58,9 @@ impl Config {
 
     pub fn load(cli: CliArgs) -> anyhow::Result<Self> {
         let source_config = FileConfig::load(cli.config)
+            .inspect_err(|e| {
+                println!("Failed to load config file: {}", e);
+            })
             .unwrap_or_default();
         let name = cli.module_name
             .or(source_config.module.name)
@@ -63,9 +86,10 @@ impl Config {
                 },
                 headers: HeaderConfig {
                     library_headers: cli.headers.into_iter()
+                        .map(ConfigIncludePath::Unconditional)
                         .chain(source_config.headers.library_headers)
-                        .unique()
-                        .sorted()
+                        .unique_by(|h| h.path().clone())
+                        .sorted_by(|a, b| a.path().cmp(b.path()))
                         .collect(),
                     include_dirs: cli.include_dirs.into_iter()
                         .chain(source_config.headers.include_dirs)
