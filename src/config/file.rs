@@ -1,10 +1,14 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Default)]
 pub struct FileConfig {
     pub module: FileModuleConfig,
+    #[serde(default)]
     pub headers: FileHeaderConfig,
+    #[serde(default)]
+    pub macros: FileMacroConfig,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -15,8 +19,20 @@ pub struct FileModuleConfig {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct FileHeaderConfig {
+    #[serde(default)]
     pub library_headers: Vec<PathBuf>,
+
+    #[serde(default)]
     pub include_dirs: Vec<PathBuf>
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct FileMacroConfig {
+    #[serde(default)]
+    pub expand_from_definition: Vec<String>,
+
+    #[serde(default)]
+    pub explicit_macros: Vec<String>
 }
 
 impl FileConfig {

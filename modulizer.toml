@@ -6,3 +6,12 @@ include_dirs = [
     "samples/fmt/include"
 ]
 library_headers = ["fmt/format.h"]
+
+[macros]
+expand_from_definition = [
+    "FMT_BEGIN_NAMESPACE",
+    "FMT_END_NAMESPACE"
+]
+explicit_macros = [
+    "FMT_CONSTEXPR=constexpr"
+]

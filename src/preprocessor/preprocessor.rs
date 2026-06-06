@@ -1,5 +1,5 @@
 use crate::preprocessor::tokens::{
-    ConditionalDirective, IncludeDirective, IncludeTarget, MacroCandidate, MacroDefinition,
+    IncludeDirective, IncludeTarget, MacroCandidate, MacroDefinition,
     PreprocessorToken, PreprocessorTokenKind, parse_tokens,
 };
 use crate::preprocessor::{Lexeme, lex};
@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Formatter;
 use std::fs;
 use std::path::PathBuf;
+use crate::config::Config;
 
 pub struct PreprocessorOutput {
     pub source: String,
@@ -18,9 +19,7 @@ struct PreprocessorState {
     tokens: Vec<PreprocessorToken>,
     included: HashSet<PathBuf>,
     definitions: HashMap<String, MacroDefinition>,
-    non_macros: HashSet<String>,
-    condition_depth: usize,
-    restore_at_depth: Option<usize>,
+    non_macros: HashSet<String>
 }
 
 #[derive(Debug, Clone)]
@@ -36,11 +35,11 @@ impl std::fmt::Display for PreprocessError {
 
 impl std::error::Error for PreprocessError {}
 
-pub fn preprocess(source: &str, include_paths: &[PathBuf]) -> anyhow::Result<PreprocessorOutput> {
+pub fn preprocess(source: &str, config: &Config) -> anyhow::Result<PreprocessorOutput> {
     let mut result = PreprocessorState::default();
     let lexemes = lex(source);
 
-    tokenize_target(lexemes, &mut result, include_paths, None)?;
+    tokenize_target(lexemes, &mut result, &config, None)?;
 
     let mut source = String::new();
 
@@ -54,7 +53,7 @@ pub fn preprocess(source: &str, include_paths: &[PathBuf]) -> anyhow::Result<Pre
 fn tokenize_target(
     lexemes: Vec<Lexeme>,
     result: &mut PreprocessorState,
-    include_paths: &[PathBuf],
+    config: &Config,
     header_name: Option<&PathBuf>,
 ) -> Result<(), PreprocessError> {
     let tokens = parse_tokens(lexemes, &result.non_macros);
@@ -62,141 +61,41 @@ fn tokenize_target(
     for token in tokens {
         match token.kind {
             PreprocessorTokenKind::Include(_) => {
-                if result.restore_at_depth.is_some() {
-                    continue;
-                }
-
-                try_expand_include(result, token, include_paths, header_name)?;
+                try_expand_include(result, token, config, header_name)?;
             }
-            PreprocessorTokenKind::Define(definition) => {
-                if result.restore_at_depth.is_some() {
-                    continue;
+            PreprocessorTokenKind::Define(ref definition) => {
+                if config.macros.expand_from_definition.contains(&definition.name) {
+                    result
+                        .definitions
+                        .insert(definition.name.clone(), definition.definition.clone());
+                    result.non_macros.remove(&definition.name);
                 }
-
-                result
-                    .definitions
-                    .insert(definition.name.clone(), definition.definition.clone());
-                result.non_macros.remove(&definition.name);
+                result.tokens.push(token)
             }
-            PreprocessorTokenKind::Undef(definition) => {
-                if result.restore_at_depth.is_some() {
-                    continue;
+            PreprocessorTokenKind::Undef(ref definition) => {
+                if config.macros.expand_from_definition.contains(&definition.name) {
+                    result.definitions.remove(&definition.name);
+                    result.non_macros.insert(definition.name.clone());
                 }
-
-                result.definitions.remove(&definition.name);
-                result.non_macros.insert(definition.name.clone());
+                result.tokens.push(token)
             }
-            PreprocessorTokenKind::If(condition) => {
-                result.condition_depth += 1;
-
-                if result.restore_at_depth.is_some() {
-                    continue;
-                }
-
-                if !evaluate_condition(result, condition) {
-                    result.restore_at_depth = Some(result.condition_depth)
-                }
-            }
-            PreprocessorTokenKind::IfDef(ref directive) => {
-                result.condition_depth += 1;
-                if result.restore_at_depth.is_some() {
-                    continue;
-                }
-
-                if !result.definitions.contains_key(&directive.name) {
-                    result.restore_at_depth = Some(result.condition_depth)
-                }
-            }
-            PreprocessorTokenKind::IfNDef(directive) => {
-                result.condition_depth += 1;
-                if result.restore_at_depth.is_some() {
-                    continue;
-                }
-
-                if result.definitions.contains_key(&directive.name) {
-                    result.restore_at_depth = Some(result.condition_depth)
-                }
-            }
-            PreprocessorTokenKind::Elif(condition) => match result.restore_at_depth {
-                Some(depth)
-                    if depth == result.condition_depth && evaluate_condition(result, condition) =>
-                {
-                    result.restore_at_depth = None;
-                }
-                Some(_) => {}
-                None => {
-                    result.restore_at_depth = Some(result.condition_depth);
-                }
-            },
-            PreprocessorTokenKind::Elifdef(directive) => match result.restore_at_depth {
-                Some(depth)
-                    if depth == result.condition_depth
-                        && result.definitions.contains_key(&directive.name) =>
-                {
-                    result.restore_at_depth = None;
-                }
-                Some(_) => {}
-                None => {
-                    result.restore_at_depth = Some(result.condition_depth);
-                }
-            },
-            PreprocessorTokenKind::Elifndef(directive) => match result.restore_at_depth {
-                Some(depth)
-                    if depth == result.condition_depth
-                        && !result.definitions.contains_key(&directive.name) =>
-                {
-                    result.restore_at_depth = None;
-                }
-                Some(_) => {}
-                None => {
-                    result.restore_at_depth = Some(result.condition_depth);
-                }
-            },
-            PreprocessorTokenKind::Else => match result.restore_at_depth {
-                Some(depth) if depth == result.condition_depth => {
-                    result.restore_at_depth = None;
-                }
-                Some(_) => {}
-                None => {
-                    result.restore_at_depth = Some(result.condition_depth);
-                }
+            PreprocessorTokenKind::If(_) => result.tokens.push(token),
+            PreprocessorTokenKind::IfDef(_) => result.tokens.push(token),
+            PreprocessorTokenKind::IfNDef(_) => result.tokens.push(token),
+            PreprocessorTokenKind::Elif(_) => result.tokens.push(token),
+            PreprocessorTokenKind::Elifdef(_) => result.tokens.push(token),
+            PreprocessorTokenKind::Elifndef(_) =>
+                result.tokens.push(token),
+            PreprocessorTokenKind::Else => {
+                result.tokens.push(token);
             },
             PreprocessorTokenKind::EndIf => {
-                if result.condition_depth == 0 {
-                    return Err(PreprocessError {
-                        message: "unmatched #endif found".to_string(),
-                    });
-                }
-
-                if result
-                    .restore_at_depth
-                    .is_some_and(|v| v == result.condition_depth)
-                {
-                    result.restore_at_depth = None;
-                }
-                result.condition_depth -= 1;
-            }
-            PreprocessorTokenKind::PragmaOnce => {
-                if result.restore_at_depth.is_some() {
-                    continue;
-                }
-
-                if let Some(header) = header_name {
-                    result.included.insert(header.clone());
-                }
+                result.tokens.push(token);
             }
             PreprocessorTokenKind::MacroCandidate(_) => {
-                if result.restore_at_depth.is_some() {
-                    continue;
-                }
-
-                try_expand_macro(result, token, include_paths, header_name)?
+                try_expand_macro(result, token, config, header_name)?
             }
             PreprocessorTokenKind::Text | PreprocessorTokenKind::OtherDirective => {
-                if result.restore_at_depth.is_some() {
-                    continue;
-                }
-
                 result.tokens.push(token);
             }
         }
@@ -208,7 +107,7 @@ fn tokenize_target(
 fn try_expand_include(
     result: &mut PreprocessorState,
     token: PreprocessorToken,
-    include_paths: &[PathBuf],
+    config: &Config,
     header_name: Option<&PathBuf>,
 ) -> Result<(), PreprocessError> {
     let PreprocessorToken { kind, original } = token;
@@ -223,9 +122,9 @@ fn try_expand_include(
 
     match include.target {
         IncludeTarget::Angled(name) => {
-            if let Some(ref header) = try_find_header(&name, include_paths, None) {
+            if let Some(ref header) = try_find_header(&name, &config.headers.include_dirs, None) {
                 println!("Expanding angled header: {}", name);
-                return tokenize_header(result, include_paths, header);
+                return tokenize_header(result, config, header);
             }
 
             result.tokens.push(PreprocessorToken {
@@ -237,9 +136,9 @@ fn try_expand_include(
         }
 
         IncludeTarget::Quoted(name) => {
-            if let Some(ref header) = try_find_header(&name, include_paths, header_name) {
+            if let Some(ref header) = try_find_header(&name, &config.headers.include_dirs, header_name) {
                 println!("Expanding quoted header: {}", name);
-                return tokenize_header(result, include_paths, header);
+                return tokenize_header(result, config, header);
             }
 
             result.tokens.push(PreprocessorToken {
@@ -273,14 +172,18 @@ fn try_expand_include(
 
 fn tokenize_header(
     result: &mut PreprocessorState,
-    include_paths: &[PathBuf],
+    include_paths: &Config,
     header: &PathBuf,
 ) -> Result<(), PreprocessError> {
     if result.included.contains(header) {
         return Ok(());
     }
 
-    let contents = fs::read_to_string(&header).expect("Unable to read file");
+    result.included.insert(header.clone());
+    let contents = fs::read_to_string(&header)
+        .map_err(|e| PreprocessError {
+            message: format!("Failed to read header file: {}", e),
+        })?;
     let lexemes = lex(&contents);
 
     tokenize_target(lexemes, result, include_paths, Some(header))
@@ -312,7 +215,7 @@ fn try_find_header<'a>(
 fn try_expand_macro(
     result: &mut PreprocessorState,
     token: PreprocessorToken,
-    include_paths: &[PathBuf],
+    config: &Config,
     header_name: Option<&PathBuf>,
 ) -> Result<(), PreprocessError> {
     let PreprocessorTokenKind::MacroCandidate(ref candidate) = token.kind else {
@@ -322,14 +225,14 @@ fn try_expand_macro(
 
     let Some(definition) = result.definitions.get(&candidate.name) else {
         result.non_macros.insert(candidate.name.clone());
-        return tokenize_target(token.original, result, include_paths, header_name);
+        return tokenize_target(token.original, result, config, header_name);
     };
 
     let Some(lexemes) = expand_macro(&token.original, candidate, definition) else {
         result.non_macros.insert(candidate.name.clone());
-        return tokenize_target(token.original, result, include_paths, header_name);
+        return tokenize_target(token.original, result, config, header_name);
     };
-    tokenize_target(lexemes, result, include_paths, header_name)
+    tokenize_target(lexemes, result, config, header_name)
 }
 
 fn expand_macro(
@@ -390,8 +293,4 @@ fn expand_macro(
         }
         MacroDefinition::Malformed { tokens: _ } => None,
     }
-}
-
-fn evaluate_condition(result: &PreprocessorState, directive: ConditionalDirective) -> bool {
-    true
 }

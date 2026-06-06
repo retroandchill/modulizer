@@ -31,6 +31,9 @@ pub struct CliArgs {
     #[arg(short = 'D', long = "define")]
     pub defines: Vec<String>,
 
+    #[arg(short = 'E', long = "expand")]
+    pub expand: Vec<String>,
+
     /// Add a header entry point.
     #[arg(long = "header")]
     pub headers: Vec<PathBuf>,

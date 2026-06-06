@@ -17,7 +17,7 @@ impl Config {
             includes.write_fmt(format_args!("#include <{header_file}>;\n"))?;
         }
 
-        let preprocessed = preprocess(&includes, self.headers.include_dirs.as_slice())?;
+        let preprocessed = preprocess(&includes, self)?;
         let mut expansion = std::fs::File::create("expanded.cpp")?;
         expansion.write(preprocessed.source.as_bytes())?;
 

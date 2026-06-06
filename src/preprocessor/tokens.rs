@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::iter;
 use crate::preprocessor::Lexeme;
+use crate::preprocessor::preprocessor::PreprocessError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreprocessorToken {
@@ -22,8 +23,6 @@ pub enum PreprocessorTokenKind {
     Elifndef(NameDirective),
     Else,
     EndIf,
-
-    PragmaOnce,
 
     OtherDirective,
     MacroCandidate(MacroCandidate),
@@ -277,8 +276,6 @@ fn parse_directive_line(line: Vec<Lexeme>) -> PreprocessorToken {
             kind: PreprocessorTokenKind::EndIf,
         },
 
-        "pragma" => parse_pragma_directive(line, position),
-
         _ => PreprocessorToken{
             original: line,
             kind: PreprocessorTokenKind::OtherDirective,
@@ -494,20 +491,6 @@ fn parse_name_directive(line: Vec<Lexeme>, position: usize, build: impl FnOnce(N
         kind: build(NameDirective {
             name,
         }),
-    }
-}
-
-fn parse_pragma_directive(line: Vec<Lexeme>, position: usize) -> PreprocessorToken {
-    let mut position = position;
-    match eat_identifier(&line, &mut position).as_deref() {
-        Some("once") => PreprocessorToken{
-            original: line,
-            kind: PreprocessorTokenKind::PragmaOnce
-        },
-        _ => PreprocessorToken{
-            original: line,
-            kind: PreprocessorTokenKind::OtherDirective,
-        },
     }
 }
 

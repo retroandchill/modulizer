@@ -1,13 +1,15 @@
-use std::path::PathBuf;
-use clap::Parser;
+use std::collections::HashSet;
 use crate::config::cli::CliArgs;
 use crate::config::file::FileConfig;
-use  itertools::Itertools;
+use clap::Parser;
+use itertools::Itertools;
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub struct Config {
     pub module: ModuleConfig,
-    pub headers: HeaderConfig
+    pub headers: HeaderConfig,
+    pub macros: MacroConfig,
 }
 
 #[derive(Debug)]
@@ -20,6 +22,12 @@ pub struct ModuleConfig {
 pub struct HeaderConfig {
     pub library_headers: Vec<PathBuf>,
     pub include_dirs: Vec<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct MacroConfig {
+    pub expand_from_definition: HashSet<String>,
+    pub explicit_macros: Vec<String>,
 }
 
 impl Config {
@@ -41,6 +49,13 @@ impl Config {
             }
         };
 
+        let mut explicit_macros = source_config.macros.explicit_macros;
+        explicit_macros.extend(cli.defines);
+
+        let expand_from_definition = source_config.macros.expand_from_definition.into_iter()
+            .chain(cli.expand.into_iter())
+            .collect();
+
         Ok(Self {
                 module: ModuleConfig {
                     name,
@@ -56,6 +71,10 @@ impl Config {
                         .chain(source_config.headers.include_dirs)
                         .unique()
                         .collect()
+                },
+                macros: MacroConfig {
+                    explicit_macros,
+                    expand_from_definition,
                 }
             })
     }
