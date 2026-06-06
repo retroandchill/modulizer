@@ -50,6 +50,10 @@ impl<'a> Lexer<'a> {
             return Some(Lexeme::StringLiteral(self.take_string_literal()));
         }
 
+        if current == '\'' {
+            return Some(Lexeme::CharacterLiteral(self.take_character_literal()));
+        }
+
         if Self::is_identifier_start(current) {
             return Some(Lexeme::Identifier(self.take_while(Self::is_identifier_continue)));
         }
@@ -139,6 +143,10 @@ impl<'a> Lexer<'a> {
                 self.advance_char();
                 Some(Lexeme::Equal)
             }
+            '.' if self.starts_with("...") => {
+                self.position += 3;
+                Some(Lexeme::Pack)
+            }
             _ => Some(Lexeme::Other(self.advance_char().to_string())),
         }
      }
@@ -222,6 +230,10 @@ impl<'a> Lexer<'a> {
         }
 
         self.take_quoted_literal('"')
+    }
+
+    fn take_character_literal(&mut self) -> String {
+        self.take_quoted_literal('\'')
     }
 
     fn take_quoted_literal(&mut self, quote: char) -> String {

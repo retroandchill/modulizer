@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::iter;
 use crate::preprocessor::Lexeme;
 
@@ -93,72 +94,93 @@ impl PreprocessorToken {
     }
 }
 
-pub fn parse_tokens(lexemes: Vec<Lexeme>) -> Vec<PreprocessorToken> {
-    let mut tokens = Vec::new();
-    let mut position: usize = 0;
+pub struct Tokenizer {
+    lexemes: Vec<Lexeme>,
+    position: usize,
+    non_whitespace_on_line: bool,
+    last_char_was_backslash: bool,
+    current_line: Vec<Lexeme>,
+}
 
-    let mut non_whitespace_on_line = false;
-    let mut last_char_was_backslash = false;
-    let mut current_line = Vec::new();
-    while let Some(current) = lexemes.get(position) {
-        if *current == Lexeme::NewLine && !last_char_was_backslash {
-            non_whitespace_on_line = false;
+impl Tokenizer {
+    pub fn new(lexemes: Vec<Lexeme>) -> Self {
+        Tokenizer {
+            lexemes,
+            position: 0,
+            non_whitespace_on_line: false,
+            last_char_was_backslash: false,
+            current_line: Vec::new(),
         }
+    }
 
-        if *current == Lexeme::Slash {
-            last_char_was_backslash = true;
-        }
-        else {
-            last_char_was_backslash = false;
-        }
-
-        if !non_whitespace_on_line && is_directive_line(&lexemes[position..]) {
-            if !current_line.is_empty() {
-                tokens.push(PreprocessorToken{
-                    original: current_line,
-                    kind: PreprocessorTokenKind::Text,
-                });
-
-                current_line = Vec::new();
+    pub fn next_token<U>(&mut self, macro_definitions: &HashMap<String, U>) -> Option<PreprocessorToken> {
+        while let Some(current) = self.lexemes.get(self.position) {
+            if *current == Lexeme::NewLine && !self.last_char_was_backslash {
+                self.non_whitespace_on_line = false;
             }
 
-            let line = get_full_line(&lexemes, &mut position);
-            tokens.push(parse_directive_line(line));
-        }
-        else if let Some(identifier) = eat_identifier(&lexemes, &mut position) {
-            if !current_line.is_empty() {
-                tokens.push(PreprocessorToken{
-                    original: current_line,
-                    kind: PreprocessorTokenKind::Text,
-                });
-
-                current_line = Vec::new();
+            if *current == Lexeme::Slash {
+                self.last_char_was_backslash = true;
+            }
+            else {
+                self.last_char_was_backslash = false;
             }
 
-            non_whitespace_on_line = true;
-            let token = parse_macro_candidate(&lexemes, &mut position, identifier);
-            match token {
-                Some(token) => tokens.push(token),
-                None => {
-                    current_line.push(current.clone());
+            if !self.non_whitespace_on_line && is_directive_line(&self.lexemes[self.position..]) {
+                if !self.current_line.is_empty() {
+                    return Some(PreprocessorToken{
+                        original: std::mem::replace(&mut self.current_line, Vec::new()),
+                        kind: PreprocessorTokenKind::Text,
+                    });
+                }
+
+                let line = get_full_line(&self.lexemes, &mut self.position);
+                return Some(parse_directive_line(line));
+            }
+            else if let Some(identifier) = eat_identifier(&self.lexemes, &mut self.position) {
+                if !self.current_line.is_empty() {
+                    return Some(PreprocessorToken{
+                        original: std::mem::replace(&mut self.current_line, Vec::new()),
+                        kind: PreprocessorTokenKind::Text,
+                    });
+                }
+
+                self.non_whitespace_on_line = true;
+
+                if !macro_definitions.contains_key(&identifier) {
+                    return Some(PreprocessorToken{
+                        original: vec!(Lexeme::Identifier(identifier.clone())),
+                        kind: PreprocessorTokenKind::Text,
+                    });
+                }
+
+                let token = parse_macro_candidate(&self.lexemes, &mut self.position, identifier);
+                match token {
+                    Some(token) => {
+                        return Some(token);
+                    },
+                    None => {
+                        self.current_line.push(current.clone());
+                    }
                 }
             }
+            else {
+                self.non_whitespace_on_line &= !is_trivial(current);
+                self.current_line.push(current.clone());
+                self.position += 1;
+            }
         }
-        else {
-            non_whitespace_on_line &= !is_trivial(current);
-            current_line.push(current.clone());
-            position += 1;
+
+        if !self.current_line.is_empty() {;
+            self.current_line = Vec::new();
+            return Some(PreprocessorToken{
+                original: std::mem::replace(&mut self.current_line, Vec::new()),
+                kind: PreprocessorTokenKind::Text,
+            });
         }
-    }
 
-    if !current_line.is_empty() {
-        tokens.push(PreprocessorToken{
-            original: current_line,
-            kind: PreprocessorTokenKind::Text,
-        });
+        None
     }
-
-    tokens
 }
 
 fn get_full_line(lexemes: &[Lexeme], position: &mut usize) -> Vec<Lexeme> {
@@ -394,7 +416,7 @@ fn parse_function_like_macro_definition(line: &[Lexeme], position: &mut usize) -
                 }
             }
 
-            Some(Lexeme::Other(str)) if str == "..." => {
+            Some(Lexeme::Pack) => {
                 *position += 1;
                 has_param_pack = true;
             }
@@ -529,7 +551,7 @@ fn parse_macro_candidate(lexemes: &[Lexeme], position: &mut usize, identifier: S
                 current_parameter = Vec::new();
             }
             any if is_trivial(any) => {
-
+                current_parameter.push(lexeme.clone());
             }
             _ => {
                 current_parameter.push(lexeme.clone());

@@ -5,6 +5,7 @@ pub enum Lexeme {
     Identifier(String),
     
     StringLiteral(String),
+    CharacterLiteral(String),
     IntegerLiteral(String),
 
     Whitespace(String),
@@ -39,6 +40,8 @@ pub enum Lexeme {
     And,
     Or,
     
+    Pack,
+    
     Other(String)
 }
 
@@ -47,13 +50,6 @@ pub fn lex(source: &str) -> Vec<Lexeme> {
     let mut lexemes = Vec::new();
     
     while let Some(lexeme) = lexer.next_lexeme() {
-        if let Lexeme::Other(ref to_append) = lexeme {
-            if let Some(Lexeme::Other(string)) = lexemes.last_mut() {
-                string.push_str(to_append);
-                continue;
-            }
-        }
-
         lexemes.push(lexeme);
     }
     
@@ -65,6 +61,7 @@ impl Lexeme {
         match self {
             Lexeme::Identifier(value)
             | Lexeme::StringLiteral(value)
+            | Lexeme::CharacterLiteral(value)
             | Lexeme::IntegerLiteral(value)
             | Lexeme::Whitespace(value)
             | Lexeme::LineComment(value)
@@ -91,6 +88,7 @@ impl Lexeme {
             Lexeme::And => "&&",
             Lexeme::Or => "||",
             Lexeme::Not => "!",
+            Lexeme::Pack => "...",
         }
     }
 }

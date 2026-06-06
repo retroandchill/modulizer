@@ -1,4 +1,4 @@
-use crate::preprocessor::tokens::{ConditionalDirective, IncludeDirective, IncludeTarget, MacroCandidate, MacroDefinition, PreprocessorToken, PreprocessorTokenKind};
+use crate::preprocessor::tokens::{ConditionalDirective, IncludeDirective, IncludeTarget, MacroCandidate, MacroDefinition, PreprocessorToken, PreprocessorTokenKind, Tokenizer};
 use crate::preprocessor::{Lexeme, lex, tokens};
 use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
@@ -55,9 +55,9 @@ fn tokenize_target(
     include_paths: &[PathBuf],
     header_name: Option<&PathBuf>,
 ) -> Result<(), PreprocessError> {
-    let tokens = tokens::parse_tokens(lexemes);
+    let mut tokenizer = Tokenizer::new(lexemes);
 
-    for token in tokens {
+    while let Some(token) = tokenizer.next_token(&result.definitions) {
         match token.kind {
             PreprocessorTokenKind::Include(_) => {
                 if result.restore_at_depth.is_some() {
@@ -318,15 +318,12 @@ fn try_expand_macro(
     };
 
     let Some(definition) = result.definitions.get(&candidate.name) else {
-        result.tokens.push(token);
-        return Ok(());
+        return tokenize_target(token.original, result, include_paths, header_name);
     };
 
     let Some(lexemes) = expand_macro(&token.original, candidate, definition) else {
-        result.tokens.push(token);
-        return Ok(());
+        return tokenize_target(token.original, result, include_paths, header_name);
     };
-    println!("Expanded macro: {}", candidate.name);
     tokenize_target(lexemes, result, include_paths, header_name)
 }
 
