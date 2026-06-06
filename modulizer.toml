@@ -13,5 +13,12 @@ expand_from_definition = [
     "FMT_END_NAMESPACE"
 ]
 explicit_macros = [
-    "FMT_CONSTEXPR=constexpr"
+    "FMT_API",
+    "FMT_NORETURN=[[noreturn]]",
+    "FMT_NODISCARD=[[noreturn]]",
+    "FMT_NO_UNIQUE_ADDRESS=[[no_unique_address]]",
+    "FMT_CONSTEXPR=constexpr",
+    "FMT_CONSTEVAL=consteval",
+    "FMT_CONSTEXPR20=constexpr",
+    "FMT_ALWAYS_INLINE=inline"
 ]

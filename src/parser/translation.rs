@@ -25,7 +25,7 @@ impl TranslationUnit {
         let mut state = TranslationUnitState {
             config,
             tokens: Vec::new(),
-            definitions: HashMap::new(),
+            definitions: get_initial_macro_definitions(config),
             header_stack: VecDeque::new(),
             seen_headers: HashSet::new()
         };
@@ -39,6 +39,36 @@ impl TranslationUnit {
     }
 }
 
+fn get_initial_macro_definitions(config: &Config) -> HashMap<String, DefineDirective> {
+    let mut definitions = HashMap::new();
+    for directive in &config.macros.explicit_macros {
+        let Some((name, replacement)) = directive.split_once("=") else {
+            definitions.insert(directive.clone(), DefineDirective {
+                name: directive.clone(),
+                parameters: None,
+                replacement: Vec::new(),
+            });
+            continue;
+        };
+
+        let tokens = lex(replacement);
+        definitions.insert(name.to_string(), DefineDirective {
+            name: name.to_string(),
+            parameters: None,
+            replacement: tokens,
+        });
+    }
+    definitions
+}
+
+fn lex(source: &str) -> Vec<Token> {
+    Token::lexer(source)
+        .filter_map(|result| {
+            result.ok()
+        })
+        .collect()
+}
+
 impl fmt::Display for TranslationUnit {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         for token in &self.tokens {
@@ -49,16 +79,8 @@ impl fmt::Display for TranslationUnit {
 }
 
 impl<'a> TranslationUnitState<'a> {
-    fn lex(&mut self, source: &str) -> Vec<Token> {
-        Token::lexer(source)
-            .filter_map(|result| {
-                result.ok()
-            })
-            .collect()
-    }
-
     fn parse_content(&mut self, source: &str) -> anyhow::Result<()> {
-        let lexemes = self.lex(source);
+        let lexemes = lex(source);
         let statements = collect_statements(&lexemes)
             .map_err(|err| anyhow::anyhow!("Failed to parse statements: {}", err))?;
 
