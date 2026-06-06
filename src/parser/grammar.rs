@@ -1,4 +1,4 @@
-use logos::Logos;
+use logos::{Lexer, Logos};
 use std::fmt;
 use std::fmt::Formatter;
 
@@ -103,7 +103,7 @@ pub enum Token {
     #[token("private")]
     Private,
 
-    #[regex(r#"(u8|u|U|L)?""#, |lex| lex.slice().to_string())]
+    #[regex(r#"(u8|u|U|L)?""#, parse_string_literal)]
     StringLiteral(String),
 
     #[regex(r"(u8|u|U|L)?'([^'\\]|\\.|\\\r?\n)*'", |lex| lex.slice().to_string())]
@@ -379,4 +379,29 @@ impl fmt::Display for Token {
             }
         )
     }
+}
+
+
+fn parse_string_literal(lex: &mut Lexer<Token>) -> Option<String> {
+    let remainder = lex.remainder();
+    let bytes = remainder.as_bytes();
+
+    let mut escaped = false;
+    let mut end = None;
+
+    for (index, byte) in bytes.iter().enumerate() {
+        match (*byte, escaped) {
+            (b'\\', false) => escaped = true,
+            (b'"', false) => {
+                end = Some(index + 1);
+                break;
+            }
+            _ => escaped = false,
+        }
+    }
+
+    let end = end?;
+    lex.bump(end);
+
+    Some(lex.slice().to_string())
 }

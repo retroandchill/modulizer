@@ -8,6 +8,7 @@ use chumsky::input::ValueInput;
 use chumsky::primitive::{any, choice, end, just};
 use chumsky::span::SimpleSpan;
 use chumsky::{Parser, extra, select};
+use logos::Lexer;
 
 #[derive(Debug)]
 pub struct PreprocessorError<'tok> {
@@ -214,7 +215,7 @@ where
     + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     any()
-        .filter(|token| !matches!(token, Token::StringLiteral(_)))
+        .filter(|token| matches!(token, Token::StringLiteral(_)))
         .then_ignore(whitespace().or_not())
         .then_ignore(optional_newline())
         .map(|token: Token| {
