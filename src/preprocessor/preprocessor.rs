@@ -1,9 +1,12 @@
-use crate::preprocessor::tokens::{ConditionalDirective, IncludeDirective, IncludeTarget, MacroCandidate, MacroDefinition, PreprocessorToken, PreprocessorTokenKind, Tokenizer};
-use crate::preprocessor::{Lexeme, lex, tokens};
-use std::collections::{HashMap, HashSet};
+use crate::preprocessor::tokens::{
+    ConditionalDirective, IncludeDirective, IncludeTarget, MacroCandidate, MacroDefinition,
+    PreprocessorToken, PreprocessorTokenKind, parse_tokens,
+};
+use crate::preprocessor::{Lexeme, lex};
 use itertools::Itertools;
-use std::{fs};
+use std::collections::{HashMap, HashSet};
 use std::fmt::Formatter;
+use std::fs;
 use std::path::PathBuf;
 
 pub struct PreprocessorOutput {
@@ -15,8 +18,9 @@ struct PreprocessorState {
     tokens: Vec<PreprocessorToken>,
     included: HashSet<PathBuf>,
     definitions: HashMap<String, MacroDefinition>,
+    non_macros: HashSet<String>,
     condition_depth: usize,
-    restore_at_depth: Option<usize>
+    restore_at_depth: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -30,9 +34,7 @@ impl std::fmt::Display for PreprocessError {
     }
 }
 
-impl std::error::Error for PreprocessError {
-
-}
+impl std::error::Error for PreprocessError {}
 
 pub fn preprocess(source: &str, include_paths: &[PathBuf]) -> anyhow::Result<PreprocessorOutput> {
     let mut result = PreprocessorState::default();
@@ -55,9 +57,9 @@ fn tokenize_target(
     include_paths: &[PathBuf],
     header_name: Option<&PathBuf>,
 ) -> Result<(), PreprocessError> {
-    let mut tokenizer = Tokenizer::new(lexemes);
+    let tokens = parse_tokens(lexemes, &result.non_macros);
 
-    while let Some(token) = tokenizer.next_token(&result.definitions) {
+    for token in tokens {
         match token.kind {
             PreprocessorTokenKind::Include(_) => {
                 if result.restore_at_depth.is_some() {
@@ -74,6 +76,7 @@ fn tokenize_target(
                 result
                     .definitions
                     .insert(definition.name.clone(), definition.definition.clone());
+                result.non_macros.remove(&definition.name);
             }
             PreprocessorTokenKind::Undef(definition) => {
                 if result.restore_at_depth.is_some() {
@@ -81,6 +84,7 @@ fn tokenize_target(
                 }
 
                 result.definitions.remove(&definition.name);
+                result.non_macros.insert(definition.name.clone());
             }
             PreprocessorTokenKind::If(condition) => {
                 result.condition_depth += 1;
@@ -113,66 +117,61 @@ fn tokenize_target(
                     result.restore_at_depth = Some(result.condition_depth)
                 }
             }
-            PreprocessorTokenKind::Elif(condition) => {
-                match result.restore_at_depth {
-                    Some(depth) if depth == result.condition_depth && evaluate_condition(result, condition) => {
-                        result.restore_at_depth = None;
-                    }
-                    Some(_) => {
-
-                    }
-                    None => {
-                        result.restore_at_depth = Some(result.condition_depth);
-                    }
+            PreprocessorTokenKind::Elif(condition) => match result.restore_at_depth {
+                Some(depth)
+                    if depth == result.condition_depth && evaluate_condition(result, condition) =>
+                {
+                    result.restore_at_depth = None;
                 }
-            }
-            PreprocessorTokenKind::Elifdef(directive) => {
-                match result.restore_at_depth {
-                    Some(depth) if depth == result.condition_depth && result.definitions.contains_key(&directive.name) => {
-                        result.restore_at_depth = None;
-                    }
-                    Some(_) => {
-
-                    }
-                    None => {
-                        result.restore_at_depth = Some(result.condition_depth);
-                    }
+                Some(_) => {}
+                None => {
+                    result.restore_at_depth = Some(result.condition_depth);
                 }
-            }
-            PreprocessorTokenKind::Elifndef(directive) => {
-                match result.restore_at_depth {
-                    Some(depth) if depth == result.condition_depth && !result.definitions.contains_key(&directive.name) => {
-                        result.restore_at_depth = None;
-                    }
-                    Some(_) => {
-
-                    }
-                    None => {
-                        result.restore_at_depth = Some(result.condition_depth);
-                    }
+            },
+            PreprocessorTokenKind::Elifdef(directive) => match result.restore_at_depth {
+                Some(depth)
+                    if depth == result.condition_depth
+                        && result.definitions.contains_key(&directive.name) =>
+                {
+                    result.restore_at_depth = None;
                 }
-            }
-            PreprocessorTokenKind::Else => {
-                match result.restore_at_depth {
-                    Some(depth) if depth == result.condition_depth => {
-                        result.restore_at_depth = None;
-                    }
-                    Some(_) => {
-
-                    }
-                    None => {
-                        result.restore_at_depth = Some(result.condition_depth);
-                    }
+                Some(_) => {}
+                None => {
+                    result.restore_at_depth = Some(result.condition_depth);
                 }
-            }
+            },
+            PreprocessorTokenKind::Elifndef(directive) => match result.restore_at_depth {
+                Some(depth)
+                    if depth == result.condition_depth
+                        && !result.definitions.contains_key(&directive.name) =>
+                {
+                    result.restore_at_depth = None;
+                }
+                Some(_) => {}
+                None => {
+                    result.restore_at_depth = Some(result.condition_depth);
+                }
+            },
+            PreprocessorTokenKind::Else => match result.restore_at_depth {
+                Some(depth) if depth == result.condition_depth => {
+                    result.restore_at_depth = None;
+                }
+                Some(_) => {}
+                None => {
+                    result.restore_at_depth = Some(result.condition_depth);
+                }
+            },
             PreprocessorTokenKind::EndIf => {
                 if result.condition_depth == 0 {
                     return Err(PreprocessError {
-                        message: "unmatched #endif found".to_string()
-                    })
+                        message: "unmatched #endif found".to_string(),
+                    });
                 }
 
-                if result.restore_at_depth.is_some_and(|v| v == result.condition_depth) {
+                if result
+                    .restore_at_depth
+                    .is_some_and(|v| v == result.condition_depth)
+                {
                     result.restore_at_depth = None;
                 }
                 result.condition_depth -= 1;
@@ -199,7 +198,7 @@ fn tokenize_target(
                 }
 
                 result.tokens.push(token);
-            },
+            }
         }
     }
 
@@ -272,7 +271,11 @@ fn try_expand_include(
     Ok(())
 }
 
-fn tokenize_header(result: &mut PreprocessorState, include_paths: &[PathBuf], header: &PathBuf) -> Result<(), PreprocessError> {
+fn tokenize_header(
+    result: &mut PreprocessorState,
+    include_paths: &[PathBuf],
+    header: &PathBuf,
+) -> Result<(), PreprocessError> {
     if result.included.contains(header) {
         return Ok(());
     }
@@ -318,20 +321,24 @@ fn try_expand_macro(
     };
 
     let Some(definition) = result.definitions.get(&candidate.name) else {
+        result.non_macros.insert(candidate.name.clone());
         return tokenize_target(token.original, result, include_paths, header_name);
     };
 
     let Some(lexemes) = expand_macro(&token.original, candidate, definition) else {
+        result.non_macros.insert(candidate.name.clone());
         return tokenize_target(token.original, result, include_paths, header_name);
     };
     tokenize_target(lexemes, result, include_paths, header_name)
 }
 
-fn expand_macro(original: &[Lexeme], candidate: &MacroCandidate, definition: &MacroDefinition) -> Option<Vec<Lexeme>> {
+fn expand_macro(
+    original: &[Lexeme],
+    candidate: &MacroCandidate,
+    definition: &MacroDefinition,
+) -> Option<Vec<Lexeme>> {
     match definition {
-        MacroDefinition::ObjectLike {
-            replacement
-        } => {
+        MacroDefinition::ObjectLike { replacement } => {
             let mut result = Vec::new();
             result.reserve(replacement.len() + original.len() - 1);
             result.extend(replacement.iter().cloned());
@@ -339,14 +346,16 @@ fn expand_macro(original: &[Lexeme], candidate: &MacroCandidate, definition: &Ma
             Some(result)
         }
         MacroDefinition::FunctionLike {
-            parameters, variadic, replacement
+            parameters,
+            variadic,
+            replacement,
         } => {
             let Some(provided_params) = candidate.parameters.as_ref() else {
-                return None
+                return None;
             };
 
             if provided_params.len() < parameters.len() {
-                return None
+                return None;
             }
 
             if provided_params.len() > parameters.len() && !variadic {
@@ -354,7 +363,8 @@ fn expand_macro(original: &[Lexeme], candidate: &MacroCandidate, definition: &Ma
             }
 
             let variadic_pack = &provided_params[parameters.len()..];
-            let param_lookup: HashMap<&str, &Vec<Lexeme>> = parameters.iter()
+            let param_lookup: HashMap<&str, &Vec<Lexeme>> = parameters
+                .iter()
                 .zip(provided_params[..parameters.len()].iter())
                 .map(|(param, arg)| (param.as_str(), arg))
                 .collect();
@@ -365,26 +375,20 @@ fn expand_macro(original: &[Lexeme], candidate: &MacroCandidate, definition: &Ma
                     Lexeme::Identifier(name) => {
                         if let Some(arg) = param_lookup.get(name.as_str()) {
                             result.extend(arg.iter().cloned())
-                        }
-                        else if name == "__VA_ARGS__" {
+                        } else if name == "__VA_ARGS__" {
                             let comma = vec![Lexeme::Comma];
-                            result.extend(variadic_pack.iter()
-                                .intersperse(&comma)
-                                .flatten()
-                                .cloned())
-                        }
-                        else {
+                            result
+                                .extend(variadic_pack.iter().intersperse(&comma).flatten().cloned())
+                        } else {
                             result.push(lexeme.clone())
                         }
                     }
-                    _ => result.push(lexeme.clone())
+                    _ => result.push(lexeme.clone()),
                 }
             }
             Some(result)
         }
-        MacroDefinition::Malformed {
-            tokens: _
-        } => None
+        MacroDefinition::Malformed { tokens: _ } => None,
     }
 }
 
