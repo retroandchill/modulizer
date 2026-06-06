@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use logos::Logos;
 use crate::config::Config;
 use crate::parser::grammar::Token;
-use crate::parser::preprocessor::{collect_statements, ConditionalDirective, DefineDirective, DirectiveStatement, IncludeDirective, IncludePath, PreprocessorStatement};
+use crate::parser::macros::{parse_expandable_syntax, ExpandableSyntax, MacroExpansionCandidate};
+use crate::parser::preprocessor::{collect_statements, parse_include_expansion, ConditionalDirective, DefineDirective, DirectiveStatement, IncludeDirective, IncludePath, MacroParameters, PreprocessorStatement};
 
 pub struct TranslationUnit {
     tokens: Vec<Token>,
@@ -14,7 +15,7 @@ pub struct TranslationUnit {
 struct TranslationUnitState<'a> {
     config: &'a Config,
     tokens: Vec<Token>,
-    definitions: HashMap<String, Vec<Token>>,
+    definitions: HashMap<String, DefineDirective>,
     header_stack: VecDeque<PathBuf>,
     seen_headers: HashSet<PathBuf>
 }
@@ -65,11 +66,19 @@ impl<'a> TranslationUnitState<'a> {
             match statement {
                 PreprocessorStatement::Directive(directive) => self.parse_directive(directive)?,
                 PreprocessorStatement::Code(code) => {
-                    self.tokens.extend_from_slice(&code.tokens);
+                    let mut tokens = code.tokens;
+                    let mut expanded = true;
+                    while expanded {
+                        let syntax = parse_expandable_syntax(&tokens)
+                            .map_err(|err| anyhow::anyhow!("Failed to expand macro: {}", err))?;
+
+                        (tokens, expanded) = self.expand_macros(syntax)?;
+                    }
+
+                    self.tokens.append(&mut tokens);
+                    self.tokens.push(Token::NewLine);
                 }
             }
-
-            self.tokens.push(Token::NewLine);
         }
 
 
@@ -95,16 +104,19 @@ impl<'a> TranslationUnitState<'a> {
             DirectiveStatement::Else => {
                 self.tokens.push(Token::Hash);
                 self.tokens.push(Token::Identifier("else".to_string()));
+                self.tokens.push(Token::NewLine);
             }
             DirectiveStatement::Endif => {
                 self.tokens.push(Token::Hash);
                 self.tokens.push(Token::Identifier("endif".to_string()));
+                self.tokens.push(Token::NewLine);
             }
             DirectiveStatement::Other(other) => {
                 self.tokens.push(Token::Hash);
                 self.tokens.push(Token::Identifier(other.name.to_string()));
                 self.tokens.push(Token::Whitespace(" ".to_string()));
                 self.tokens.extend_from_slice(&other.expression);
+                self.tokens.push(Token::NewLine);
             }
         }
 
@@ -113,14 +125,23 @@ impl<'a> TranslationUnitState<'a> {
 
     fn parse_include(&mut self, directive: IncludeDirective) -> anyhow::Result<()> {
         match directive.path {
-            IncludePath::System(path) => self.try_expand_header(&directive.tokens, path, false)?,
-            IncludePath::Local(path) => self.try_expand_header(&directive.tokens, path, true)?,
+            IncludePath::System(path) => self.try_expand_header(&directive.tokens, path, false),
+            IncludePath::Local(path) => self.try_expand_header(&directive.tokens, path, true),
             IncludePath::Macro => {
+                let syntax = parse_expandable_syntax(&directive.tokens)
+                    .map_err(|err| anyhow::anyhow!("Failed to expand macro: {}", err))?;
 
+                let (tokens, expanded) = self.expand_macros(syntax)?;
+                if !expanded {
+                    return Err(anyhow::anyhow!("Failed to expand macro into a valid include"));
+                }
+
+                let expansion = parse_include_expansion(&tokens)
+                    .map_err(|err| anyhow::anyhow!("Failed to parse include expansion: {}", err))?;
+
+                self.parse_include(expansion)
             },
-        };
-
-        Ok(())
+        }
     }
 
     fn try_expand_header(&mut self, source_tokens: &[Token], path: PathBuf, search_current_path: bool) -> anyhow::Result<()> {
@@ -139,18 +160,6 @@ impl<'a> TranslationUnitState<'a> {
         }
 
         let Some(header) = target else {
-            self.tokens.push(Token::Hash);
-            self.tokens.push(Token::Identifier("include".to_string()));
-            self.tokens.push(Token::Whitespace(" ".to_string()));
-            if search_current_path {
-                self.tokens.extend_from_slice(source_tokens);
-            }
-            else {
-                self.tokens.push(Token::Less);
-                self.tokens.extend_from_slice(source_tokens);
-                self.tokens.push(Token::Greater);
-            }
-
             return Ok(());
         };
 
@@ -168,42 +177,15 @@ impl<'a> TranslationUnitState<'a> {
     }
 
     fn parse_definition(&mut self, define: DefineDirective) {
-        self.tokens.push(Token::Hash);
-        self.tokens.push(Token::Identifier("define".to_string()));
-        self.tokens.push(Token::Whitespace(" ".to_string()));
-        self.tokens.push(Token::Identifier(define.name));
-        if let Some(parameters) = &define.parameters {
-            self.tokens.push(Token::LParen);
-            let mut index: usize = 0;
-            for name in &parameters.names {
-                if index > 0 {
-                    self.tokens.push(Token::Comma);
-                    self.tokens.push(Token::Whitespace(" ".to_string()));
-                }
-                self.tokens.push(Token::Identifier(name.to_string()));
-                index += 1;
-            }
-
-            if parameters.variadic {
-                if index > 0 {
-                    self.tokens.push(Token::Comma);
-                    self.tokens.push(Token::Whitespace(" ".to_string()));
-                }
-
-                self.tokens.push(Token::Ellipsis);
-            }
-
-            self.tokens.push(Token::RParen);
+        if self.config.macros.expand_from_definition.contains(&define.name) {
+            self.definitions.insert(define.name.clone(), define);
         }
-        self.tokens.push(Token::Whitespace(" ".to_string()));
-        self.tokens.extend_from_slice(define.replacement.as_slice());
     }
 
     fn parse_undefine(&mut self, name: String) {
-        self.tokens.push(Token::Hash);
-        self.tokens.push(Token::Identifier("undef".to_string()));
-        self.tokens.push(Token::Whitespace(" ".to_string()));
-        self.tokens.push(Token::Identifier(name));
+        if self.config.macros.expand_from_definition.contains(&name) {
+            self.definitions.remove(&name);
+        }
     }
 
     fn parse_conditional(&mut self, conditional: ConditionalDirective) {
@@ -240,5 +222,125 @@ impl<'a> TranslationUnitState<'a> {
                 self.tokens.push(Token::Identifier(name));
             }
         }
+        self.tokens.push(Token::NewLine);
     }
+
+    fn expand_macros(&mut self, syntax: Vec<ExpandableSyntax>) -> anyhow::Result<(Vec<Token>, bool)> {
+        let mut tokens = Vec::new();
+        let mut expanded = false;
+        for expression in syntax {
+            match expression {
+                ExpandableSyntax::Candidate(candidate) => {
+                    expanded |= self.try_expand_macro(candidate, &mut tokens)?;
+                }
+                ExpandableSyntax::Expression(mut expression) => {
+                    tokens.append(&mut expression);
+                }
+            }
+        }
+
+        Ok((tokens, expanded))
+    }
+
+    fn try_expand_macro(&mut self, candidate: MacroExpansionCandidate, tokens: &mut Vec<Token>) -> anyhow::Result<bool> {
+        let Some(definition) = self.definitions.get(&candidate.name) else {
+            tokens.push(Token::Identifier(candidate.name));
+            if let Some(mut parameters) = candidate.parameters {
+                append_macro_parameters(&mut parameters, tokens);
+            }
+            return Ok(false);
+        };
+
+        match &definition.parameters {
+            Some(parameters) => {
+                expand_functional_macro(candidate, &definition.name, parameters, definition.replacement.as_slice(), tokens)?;
+                Ok(true)
+            }
+            None => {
+                tokens.extend_from_slice(definition.replacement.as_slice());
+                if let Some(mut parameters) = candidate.parameters {
+                    append_macro_parameters(&mut parameters, tokens);
+                }
+                Ok(true)
+            }
+        }
+
+    }
+}
+
+fn expand_functional_macro(candidate: MacroExpansionCandidate, name: &str, parameters: &MacroParameters, replacement: &[Token], tokens: &mut Vec<Token>) -> anyhow::Result<()> {
+    let Some(provided_parameters) = candidate.parameters else {
+        return Err(anyhow::anyhow!("Macro {} was used, but no parameters were provided", name));
+    };
+
+    if provided_parameters.len() > parameters.names.len() && !parameters.variadic {
+        return Err(anyhow::anyhow!("Macro {} was used with too many parameters", name));
+    }
+
+    if provided_parameters.len() < parameters.names.len() {
+        return Err(anyhow::anyhow!("Macro {} was used with too few parameters", name));
+    }
+
+    let lookup_name = |name: &str| -> Option<&[Token]> {
+        for (i, parameter) in parameters.names.iter().enumerate() {
+            if i >= provided_parameters.len() {
+                return None;
+            }
+
+            if parameter == name {
+                return Some(&provided_parameters[i]);
+            }
+        }
+
+        None
+    };
+
+    let variadic_pack = &provided_parameters[parameters.names.len()..];
+
+    for token in replacement {
+        match token {
+            Token::Identifier(identifier) => {
+                if identifier == "__VA_ARGS__" {
+                    let mut index: usize = 0;
+                    for parameter_set in variadic_pack {
+                        if index > 0 {
+                            tokens.push(Token::Comma);
+                            tokens.push(Token::Whitespace(" ".to_string()));
+                        }
+
+                        tokens.append(&mut parameter_set.clone());
+                        index += 1;
+                    }
+                }
+                else if let Some(parameter_set) = lookup_name(identifier) {
+                    tokens.extend_from_slice(parameter_set);
+                }
+                else {
+                    tokens.push(token.clone());
+                }
+            }
+            _ => {
+                tokens.push(token.clone());
+            }
+        }
+    }
+
+
+    Ok(())
+}
+
+fn append_macro_parameters(parameters: &mut Vec<Vec<Token>>, tokens: &mut Vec<Token>) {
+    let mut index: usize = 0;
+    tokens.push(Token::LParen);
+    for mut parameter in parameters {
+        if index > 0 {
+            tokens.push(Token::Comma);
+            tokens.push(Token::Whitespace(" ".to_string()));
+        }
+
+        tokens.append(&mut parameter);
+
+        index += 1;
+    }
+    tokens.push(Token::RParen);
 }

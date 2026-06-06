@@ -271,7 +271,7 @@ pub enum Token {
     #[token("\\")]
     Backslash,
 
-    #[regex(r"/(\r\n|\n|\r)")]
+    #[regex(r"\\(\r\n|\n|\r)")]
     Continuation,
 }
 
@@ -375,7 +375,7 @@ impl fmt::Display for Token {
                 Token::Bang => "!",
                 Token::Question => "?",
                 Token::Backslash => "/",
-                Token::Continuation => "/\\n",
+                Token::Continuation => "\\\n",
             }
         )
     }
