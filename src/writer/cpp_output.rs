@@ -42,9 +42,7 @@ impl Config {
         }
 
         let mut symbol_context = SymbolWriteContext::new(&mut writer);
-        for symbol in translation_unit.symbols() {
-            symbol_context.emit_symbol(symbol)?;
-        }
+        symbol_context.emit_symbols(translation_unit.symbols())?;
 
         Ok(())
     }
