@@ -295,8 +295,10 @@ impl<'a> TranslationUnitState<'a> {
             .flat_map(|guard| guard.into_iter())
             .collect::<Vec<_>>();
 
-        parse_symbols(tokens.as_slice())
-            .map_err(|err| anyhow::anyhow!("Failed to parse symbols: {}", err))
+        let raw_symbols = parse_symbols(tokens.as_slice())
+            .map_err(|err| anyhow::anyhow!("Failed to parse symbols: {}", err))?;
+
+        Ok(raw_symbols)
     }
 }
 

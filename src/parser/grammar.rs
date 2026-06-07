@@ -126,77 +126,10 @@ pub enum Token {
 
     #[token("->")]
     Arrow,
-
-    #[token("->*")]
-    ArrowStar,
-
-    #[token(".*")]
-    DotStar,
-
-    #[token("<=>")]
-    Spaceship,
-
+    
     #[token("==")]
     EqualEqual,
 
-    #[token("!=")]
-    NotEqual,
-
-    #[token("<=")]
-    LessEqual,
-
-    #[token(">=")]
-    GreaterEqual,
-
-    #[token("&&")]
-    AndAnd,
-
-    #[token("||")]
-    OrOr,
-
-    #[token("++")]
-    PlusPlus,
-
-    #[token("--")]
-    MinusMinus,
-
-    #[token("+=")]
-    PlusEqual,
-
-    #[token("-=")]
-    MinusEqual,
-
-    #[token("*=")]
-    StarEqual,
-
-    #[token("/=")]
-    SlashEqual,
-
-    #[token("%=")]
-    PercentEqual,
-
-    #[token("&=")]
-    AmpEqual,
-
-    #[token("|=")]
-    PipeEqual,
-
-    #[token("^=")]
-    CaretEqual,
-
-    #[token("<<")]
-    ShiftLeft,
-
-    #[token(">>")]
-    ShiftRight,
-
-    #[token("<<=")]
-    ShiftLeftEqual,
-
-    #[token(">>=")]
-    ShiftRightEqual,
-
-    // Single-character punctuation.
     #[token("(")]
     LParen,
 
@@ -328,29 +261,7 @@ impl fmt::Display for Token {
                 Token::DoubleColon => "::",
                 Token::Ellipsis => "...",
                 Token::Arrow => "->",
-                Token::ArrowStar => "->*",
-                Token::DotStar => ".*",
-                Token::Spaceship => "<=>",
                 Token::EqualEqual => "==",
-                Token::NotEqual => "!=",
-                Token::LessEqual => "<=",
-                Token::GreaterEqual => ">=",
-                Token::AndAnd => "&&",
-                Token::OrOr => "||",
-                Token::PlusPlus => "++",
-                Token::MinusMinus => "--",
-                Token::PlusEqual => "+=",
-                Token::MinusEqual => "-=",
-                Token::StarEqual => "*=",
-                Token::SlashEqual => "/=",
-                Token::PercentEqual => "%=",
-                Token::AmpEqual => "&=",
-                Token::PipeEqual => "|=",
-                Token::CaretEqual => "^=",
-                Token::ShiftLeft => "<<",
-                Token::ShiftRight => ">>",
-                Token::ShiftLeftEqual => "<<=",
-                Token::ShiftRightEqual => ">>=",
                 Token::LParen => "(",
                 Token::RParen => ")",
                 Token::LBrace => "{",
