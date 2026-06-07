@@ -88,7 +88,7 @@ where
 
 
 pub fn identifier<'tok, I>(
-) -> impl Parser<'tok, I, String, extra::Err<Rich<'tok, Token>>>
+) -> impl Parser<'tok, I, String, extra::Err<Rich<'tok, Token>>> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>,
 {

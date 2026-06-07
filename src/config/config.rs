@@ -4,6 +4,7 @@ use crate::config::file::FileConfig;
 use clap::Parser;
 use itertools::Itertools;
 use std::path::PathBuf;
+use regex::Regex;
 use serde::Deserialize;
 
 #[derive(Debug)]
@@ -42,6 +43,7 @@ impl ConfigIncludePath {
 pub struct HeaderConfig {
     pub library_headers: Vec<ConfigIncludePath>,
     pub include_dirs: Vec<PathBuf>,
+    pub header_guard_format: Option<Regex>,
 }
 
 #[derive(Debug)]
@@ -94,7 +96,10 @@ impl Config {
                     include_dirs: cli.include_dirs.into_iter()
                         .chain(source_config.headers.include_dirs)
                         .unique()
-                        .collect()
+                        .collect(),
+                    header_guard_format: cli.header_guard
+                        .and_then(|s| Regex::new(&s).ok())
+                        .or(source_config.headers.header_guard_format)
                 },
                 macros: MacroConfig {
                     explicit_macros,

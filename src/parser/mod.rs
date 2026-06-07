@@ -1,6 +1,6 @@
-mod grammar;
+pub mod grammar;
 pub mod translation;
 pub mod symbols;
-mod preprocessor;
+pub mod preprocessor;
 mod common;
 mod macros;

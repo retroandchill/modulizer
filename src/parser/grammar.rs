@@ -1,6 +1,7 @@
 use logos::{Lexer, Logos};
 use std::fmt;
 use std::fmt::Formatter;
+use crate::parser::preprocessor::ConditionalDirective;
 
 #[derive(Logos, Clone, Debug, PartialEq)]
 pub enum Token {
@@ -404,4 +405,73 @@ fn parse_string_literal(lex: &mut Lexer<Token>) -> Option<String> {
     lex.bump(end);
 
     Some(lex.slice().to_string())
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PreprocessorGuard {
+    Conditional(ConditionalDirective),
+    Else
+}
+
+#[derive(Debug, Clone)]
+pub struct GuardedTokens {
+    guards: Vec<PreprocessorGuard>,
+    tokens: Vec<Token>,
+}
+
+impl GuardedTokens {
+    pub fn new(guards: impl Iterator<Item = PreprocessorGuard>) -> Self {
+        Self {
+            guards: guards.collect(),
+            tokens: Vec::new(),
+        }
+    }
+
+    pub fn append(&mut self, tokens: impl Iterator<Item = Token>) {
+        self.tokens.extend(tokens.filter(|token| !token.is_trivial()));
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GuardedToken<'a> {
+    pub guards: &'a [PreprocessorGuard],
+    pub token: &'a Token,
+}
+
+impl<'a> fmt::Display for GuardedToken<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.token)
+    }
+}
+
+pub struct GuardedTokenIterator<'a> {
+    tokens: &'a GuardedTokens,
+    index: Option<usize>,
+}
+
+impl<'a> Iterator for GuardedTokenIterator<'a> {
+    type Item = GuardedToken<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(index) = self.index {
+            self.index = Some(index + 1);
+        }
+        else {
+            self.index = Some(0);
+        }
+        
+        let index = self.index.unwrap();
+        self.tokens.tokens.get(index)
+            .map(|token| GuardedToken { guards: self.tokens.guards.as_slice(), token })
+        
+    }
+}
+
+impl<'a> IntoIterator for &'a GuardedTokens {
+    type Item = GuardedToken<'a>;
+    type IntoIter = GuardedTokenIterator<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Self::IntoIter { tokens: self, index: None }
+    }
 }

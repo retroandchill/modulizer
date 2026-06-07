@@ -3,7 +3,7 @@ use std::io::Write;
 use crate::config::{Config, ConfigIncludePath};
 use crate::parser::translation::TranslationUnit;
 use crate::writer::IndentedWriter;
-
+use crate::writer::symbols::SymbolWriteContext;
 
 impl Config {
     pub fn output_module(&self) -> anyhow::Result<()> {
@@ -26,13 +26,25 @@ impl Config {
         }
 
         let translation_unit = TranslationUnit::new(self, &includes)?;
-        let mut expansion = std::fs::File::create("expanded.cpp")?;
-        expansion.write_fmt(format_args!("{}", translation_unit))?;
 
         writer.write_all(b"module;\n\n")?;
         writer.write_all(includes.as_bytes())?;
         let name = &self.module.name;
         writer.write_fmt(format_args!("\nexport module {name};\n"))?;
+
+        if translation_unit.has_macros() {
+            writer.write_all(b"\n\n")?;
+            writer.write_all(b"/*\nDiscovered Macros:\n")?;
+            for macro_name in translation_unit.macros() {
+                writer.write_fmt(format_args!("- {macro_name}\n"))?;
+            }
+            writer.write_all(b"*/\n")?;
+        }
+
+        let mut symbol_context = SymbolWriteContext::new(&mut writer);
+        for symbol in translation_unit.symbols() {
+            symbol_context.emit_symbol(symbol)?;
+        }
 
         Ok(())
     }

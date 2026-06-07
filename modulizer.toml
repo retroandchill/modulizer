@@ -18,6 +18,7 @@ library_headers = [
     "fmt/std.h",
     "fmt/xchar.h"
 ]
+header_guard_format = "FMT_(\\w+)_H_"
 
 [macros]
 expand_from_definition = [

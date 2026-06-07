@@ -1,23 +1,26 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fmt;
-use std::fmt::Formatter;
 use std::path::PathBuf;
+use itertools::Itertools;
 use logos::Logos;
 use crate::config::Config;
-use crate::parser::grammar::Token;
+use crate::parser::grammar::{GuardedTokens, PreprocessorGuard, Token};
 use crate::parser::macros::{parse_expandable_syntax, ExpandableSyntax, MacroExpansionCandidate};
 use crate::parser::preprocessor::{collect_statements, parse_include_expansion, ConditionalDirective, DefineDirective, DirectiveStatement, IncludeDirective, IncludePath, MacroParameters, PreprocessorStatement};
+use crate::parser::symbols::{parse_symbols, Symbol};
 
 pub struct TranslationUnit {
-    tokens: Vec<Token>,
+    symbols: Vec<Symbol>,
+    macros: HashSet<String>,
 }
 
 struct TranslationUnitState<'a> {
     config: &'a Config,
-    tokens: Vec<Token>,
+    tokens: Vec<GuardedTokens>,
     definitions: HashMap<String, DefineDirective>,
     header_stack: VecDeque<PathBuf>,
-    seen_headers: HashSet<PathBuf>
+    seen_headers: HashSet<PathBuf>,
+    all_macros: HashSet<String>,
+    guards: VecDeque<PreprocessorGuard>,
 }
 
 impl TranslationUnit {
@@ -27,15 +30,32 @@ impl TranslationUnit {
             tokens: Vec::new(),
             definitions: get_initial_macro_definitions(config),
             header_stack: VecDeque::new(),
-            seen_headers: HashSet::new()
+            seen_headers: HashSet::new(),
+            all_macros: HashSet::new(),
+            guards: VecDeque::new(),
         };
 
         state.parse_content(source)?;
 
 
         Ok(Self {
-            tokens: state.tokens,
+            symbols: state.collect_symbols()?,
+            macros: state.all_macros,
         })
+    }
+
+    pub fn has_macros(&self) -> bool {
+        !self.macros.is_empty()
+    }
+
+    pub fn macros(&self) -> impl Iterator<Item = &str> {
+        self.macros.iter()
+            .map(|macro_name| macro_name.as_str())
+            .sorted()
+    }
+
+    pub fn symbols(&self) -> impl Iterator<Item = &Symbol> {
+        self.symbols.iter()
     }
 }
 
@@ -69,15 +89,6 @@ fn lex(source: &str) -> Vec<Token> {
         .collect()
 }
 
-impl fmt::Display for TranslationUnit {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        for token in &self.tokens {
-            write!(f, "{}", token)?;
-        }
-        Ok(())
-    }
-}
-
 impl<'a> TranslationUnitState<'a> {
     fn parse_content(&mut self, source: &str) -> anyhow::Result<()> {
         let lexemes = lex(source);
@@ -97,8 +108,21 @@ impl<'a> TranslationUnitState<'a> {
                         (tokens, expanded) = self.expand_macros(syntax)?;
                     }
 
-                    self.tokens.append(&mut tokens);
-                    self.tokens.push(Token::NewLine);
+                    let mut guarded_tokens = GuardedTokens::new(self.guards.iter()
+                        .filter(|guard| {
+                            match guard {
+                                PreprocessorGuard::Conditional(ConditionalDirective::Ifndef { name }) => {
+                                    self.config.headers.header_guard_format.as_ref().map(|r| {
+                                        !r.is_match(name)
+                                    })
+                                        .unwrap_or(true)
+                                }
+                                _ => true,
+                            }
+                        })
+                        .cloned());
+                    guarded_tokens.append(tokens.into_iter());
+                    self.tokens.push(guarded_tokens);
                 }
             }
         }
@@ -115,30 +139,29 @@ impl<'a> TranslationUnitState<'a> {
                 self.parse_include(include)?;
             }
             DirectiveStatement::Define(define) => {
+                self.all_macros.insert(define.name.clone());
                 self.parse_definition(define);
             }
             DirectiveStatement::Undef(undef) => {
+                self.all_macros.remove(&undef.name);
                 self.parse_undefine(undef.name);
             }
             DirectiveStatement::Conditional(conditional) => {
-                self.parse_conditional(conditional);
+                self.parse_conditional(conditional)?;
             }
             DirectiveStatement::Else => {
-                self.tokens.push(Token::Hash);
-                self.tokens.push(Token::Identifier("else".to_string()));
-                self.tokens.push(Token::NewLine);
+                let Some(guard) = self.guards.back_mut() else {
+                    return Err(anyhow::anyhow!("Else without preceding if"));
+                };
+                *guard = PreprocessorGuard::Else;
             }
             DirectiveStatement::Endif => {
-                self.tokens.push(Token::Hash);
-                self.tokens.push(Token::Identifier("endif".to_string()));
-                self.tokens.push(Token::NewLine);
+                if self.guards.pop_back().is_none() {
+                    return Err(anyhow::anyhow!("Endif without preceding if"));
+                }
             }
-            DirectiveStatement::Other(other) => {
-                self.tokens.push(Token::Hash);
-                self.tokens.push(Token::Identifier(other.name.to_string()));
-                self.tokens.push(Token::Whitespace(" ".to_string()));
-                self.tokens.extend_from_slice(&other.expression);
-                self.tokens.push(Token::NewLine);
+            DirectiveStatement::Other => {
+                // We want to just discard these, since they don't affect the analysis
             }
         }
 
@@ -147,8 +170,8 @@ impl<'a> TranslationUnitState<'a> {
 
     fn parse_include(&mut self, directive: IncludeDirective) -> anyhow::Result<()> {
         match directive.path {
-            IncludePath::System(path) => self.try_expand_header(&directive.tokens, path, false),
-            IncludePath::Local(path) => self.try_expand_header(&directive.tokens, path, true),
+            IncludePath::System(path) => self.try_expand_header(path, false),
+            IncludePath::Local(path) => self.try_expand_header(path, true),
             IncludePath::Macro => {
                 let syntax = parse_expandable_syntax(&directive.tokens)
                     .map_err(|err| anyhow::anyhow!("Failed to expand macro: {}", err))?;
@@ -166,7 +189,7 @@ impl<'a> TranslationUnitState<'a> {
         }
     }
 
-    fn try_expand_header(&mut self, source_tokens: &[Token], path: PathBuf, search_current_path: bool) -> anyhow::Result<()> {
+    fn try_expand_header(&mut self, path: PathBuf, search_current_path: bool) -> anyhow::Result<()> {
         let mut target = None;
         if let Some(parent) = self.header_stack.back().and_then(|h| h.parent()) && search_current_path {
             target = Some(parent.join(&path)).filter(|p| p.exists());
@@ -210,41 +233,19 @@ impl<'a> TranslationUnitState<'a> {
         }
     }
 
-    fn parse_conditional(&mut self, conditional: ConditionalDirective) {
-        self.tokens.push(Token::Hash);
-        match conditional {
-            ConditionalDirective::If { expression } => {
-                self.tokens.push(Token::Identifier("if".to_string()));
-                self.tokens.push(Token::Whitespace(" ".to_string()));
-                self.tokens.extend_from_slice(&expression);
+    fn parse_conditional(&mut self, conditional: ConditionalDirective) -> anyhow::Result<()> {
+        match &conditional {
+            ConditionalDirective::If { .. }| ConditionalDirective::Ifdef { .. } | ConditionalDirective::Ifndef { .. } => {
+                self.guards.push_back(PreprocessorGuard::Conditional(conditional));
             }
-            ConditionalDirective::Ifdef { name } => {
-                self.tokens.push(Token::Identifier("ifdef".to_string()));
-                self.tokens.push(Token::Whitespace(" ".to_string()));
-                self.tokens.push(Token::Identifier(name));
-            }
-            ConditionalDirective::Ifndef { name } => {
-                self.tokens.push(Token::Identifier("ifndef".to_string()));
-                self.tokens.push(Token::Whitespace(" ".to_string()));
-                self.tokens.push(Token::Identifier(name));
-            }
-            ConditionalDirective::Elif { expression } => {
-                self.tokens.push(Token::Identifier("elif".to_string()));
-                self.tokens.push(Token::Whitespace(" ".to_string()));
-                self.tokens.extend_from_slice(&expression);
-            }
-            ConditionalDirective::Elifdef { name } => {
-                self.tokens.push(Token::Identifier("elifdef".to_string()));
-                self.tokens.push(Token::Whitespace(" ".to_string()));
-                self.tokens.push(Token::Identifier(name));
-            }
-            ConditionalDirective::Elifndef { name } => {
-                self.tokens.push(Token::Identifier("elifndef".to_string()));
-                self.tokens.push(Token::Whitespace(" ".to_string()));
-                self.tokens.push(Token::Identifier(name));
+            ConditionalDirective::Elif { .. } | ConditionalDirective::Elifdef { .. } | ConditionalDirective::Elifndef { .. } => {
+                let Some(guard) = self.guards.back_mut() else {
+                    return Err(anyhow::anyhow!("Elif without preceding if"));
+                };
+                *guard = PreprocessorGuard::Conditional(conditional);
             }
         }
-        self.tokens.push(Token::NewLine);
+        Ok(())
     }
 
     fn expand_macros(&mut self, syntax: Vec<ExpandableSyntax>) -> anyhow::Result<(Vec<Token>, bool)> {
@@ -287,6 +288,15 @@ impl<'a> TranslationUnitState<'a> {
             }
         }
 
+    }
+
+    fn collect_symbols(&self) -> anyhow::Result<Vec<Symbol>> {
+        let tokens = self.tokens.iter()
+            .flat_map(|guard| guard.into_iter())
+            .collect::<Vec<_>>();
+
+        parse_symbols(tokens.as_slice())
+            .map_err(|err| anyhow::anyhow!("Failed to parse symbols: {}", err))
     }
 }
 

@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use serde::Deserialize;
+use regex::Regex;
 use crate::config::config::ConfigIncludePath;
 
 #[derive(Debug, Deserialize, Default)]
@@ -24,7 +24,10 @@ pub struct FileHeaderConfig {
     pub library_headers: Vec<ConfigIncludePath>,
 
     #[serde(default)]
-    pub include_dirs: Vec<PathBuf>
+    pub include_dirs: Vec<PathBuf>,
+
+    #[serde(with = "serde_regex")]
+    pub header_guard_format: Option<Regex>,
 }
 
 #[derive(Debug, Deserialize, Default)]

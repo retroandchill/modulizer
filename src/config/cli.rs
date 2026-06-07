@@ -22,6 +22,10 @@ pub struct CliArgs {
     #[arg(short = 'I', long = "include")]
     pub include_dirs: Vec<PathBuf>,
 
+    /// Add an include directory.
+    #[arg(short = 'G', long = "guard")]
+    pub header_guard: Option<String>,
+
     /// Add or override a preprocessor definition.
     ///
     /// Examples:

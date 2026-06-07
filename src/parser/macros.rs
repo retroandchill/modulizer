@@ -1,11 +1,11 @@
+use crate::parser::common::{identifier, whitespace, PreprocessorError};
+use crate::parser::grammar::Token;
 use chumsky::error::Rich;
-use chumsky::{extra, IterParser, ParseResult, Parser};
 use chumsky::input::ValueInput;
 use chumsky::prelude::SimpleSpan;
 use chumsky::primitive::{any, choice, just};
 use chumsky::recursive::recursive;
-use crate::parser::common::{identifier, whitespace, PreprocessorError};
-use crate::parser::grammar::Token;
+use chumsky::{extra, IterParser, Parser};
 
 #[derive(Debug, Clone)]
 pub struct MacroExpansionCandidate {

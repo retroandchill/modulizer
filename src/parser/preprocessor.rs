@@ -40,7 +40,7 @@ pub struct UndefDirective {
     pub name: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ConditionalDirective {
     If {
         expression: Vec<Token>,
@@ -63,12 +63,6 @@ pub enum ConditionalDirective {
 }
 
 #[derive(Debug, Clone)]
-pub struct  OtherDirective {
-    pub name: String,
-    pub expression: Vec<Token>,
-}
-
-#[derive(Debug, Clone)]
 pub enum DirectiveStatement {
     Include(IncludeDirective),
     Define(DefineDirective),
@@ -76,7 +70,7 @@ pub enum DirectiveStatement {
     Conditional(ConditionalDirective),
     Else,
     Endif,
-    Other(OtherDirective),
+    Other,
 }
 
 #[derive(Debug, Clone)]
@@ -445,8 +439,8 @@ where
         .then_ignore(non_breaking_whitespace())
         .then(rest_of_line())
         .then_ignore(optional_newline())
-        .map(|(name, expression)| {
-            DirectiveStatement::Other(OtherDirective { name, expression: expression.to_vec() })
+        .map(|_| {
+            DirectiveStatement::Other
         })
 }
 
