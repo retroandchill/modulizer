@@ -186,7 +186,6 @@ impl<'tok> SymbolParser<'tok> {
 
         let mut paren_depth = 0usize;
         let mut bracket_depth = 0usize;
-        let mut angle_depth = 0usize;
         let mut brace_depth = 0usize;
 
         while let Some(guarded) = self.peek() {
@@ -194,7 +193,6 @@ impl<'tok> SymbolParser<'tok> {
                 Token::Semicolon
                 if paren_depth == 0
                     && bracket_depth == 0
-                    && angle_depth == 0
                     && brace_depth == 0 =>
                     {
                         self.advance();
@@ -202,7 +200,7 @@ impl<'tok> SymbolParser<'tok> {
                     }
 
                 Token::LBrace
-                if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 =>
+                if paren_depth == 0 && bracket_depth == 0 =>
                     {
                         brace_depth += 1;
                         self.advance();
@@ -231,7 +229,6 @@ impl<'tok> SymbolParser<'tok> {
                 Token::RBrace
                 if paren_depth == 0
                     && bracket_depth == 0
-                    && angle_depth == 0
                     && brace_depth == 0 =>
                     {
                         break;
@@ -251,14 +248,6 @@ impl<'tok> SymbolParser<'tok> {
                 }
                 Token::RBracket => {
                     bracket_depth = bracket_depth.saturating_sub(1);
-                    self.advance();
-                }
-                Token::Less => {
-                    angle_depth += 1;
-                    self.advance();
-                }
-                Token::Greater => {
-                    angle_depth = angle_depth.saturating_sub(1);
                     self.advance();
                 }
                 _ => {
