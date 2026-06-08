@@ -28,6 +28,8 @@ expand_from_definition = [
 explicit_macros = [
     "FMT_API",
     "FMT_EXPORT",
+    "FMT_BEGIN_EXPORT",
+    "FMT_END_EXPORT",
     "FMT_NORETURN=[[noreturn]]",
     "FMT_NODISCARD=[[noreturn]]",
     "FMT_NO_UNIQUE_ADDRESS=[[no_unique_address]]",

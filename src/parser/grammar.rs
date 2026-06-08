@@ -59,6 +59,9 @@ pub enum Token {
     #[token("requires")]
     Requires,
 
+    #[token("virtual")]
+    Virtual,
+
     #[token("friend")]
     Friend,
 
@@ -239,6 +242,7 @@ impl fmt::Display for Token {
                 Token::Concept => "concept",
                 Token::Requires => "requires",
                 Token::Friend => "friend",
+                Token::Virtual => "virtual",
                 Token::Extern => "extern",
                 Token::Static => "static",
                 Token::Explicit => "explicit",

@@ -1,11 +1,8 @@
 use crate::parser::grammar::{GuardedToken, PreprocessorGuard, Token};
 use chumsky::error::Rich;
-use chumsky::input::{SliceInput, ValueInput};
-use chumsky::prelude::{IterParser, SimpleSpan};
-use chumsky::primitive::{any, choice};
-use chumsky::recursive::recursive;
-use chumsky::{Parser, extra};
+use chumsky::Parser;
 use std::fmt;
+use clap::builder::TypedValueParser;
 
 #[derive(Debug)]
 pub struct SymbolError<'tok> {
@@ -57,12 +54,18 @@ pub enum SymbolKind {
         name: String,
         scoped: bool,
     },
-    Using {
+    TypeAlias {
         name: String,
-        namespace: bool
     },
-    Typedef {
+    UsingNamespace {
         name: String,
+    },
+    UsingDeclaration {
+        name: String,
+    },
+    NamespaceAlias {
+        name: String,
+        target: String,
     },
     Function {
         name: String,
@@ -109,9 +112,13 @@ impl<'tok> SymbolParser<'tok> {
                 break;
             }
 
+            let start = self.index;
+
             if let Some(symbol) = self.parse_symbol() {
                 symbols.push(symbol);
-            } else {
+            }
+
+            if self.index == start {
                 self.advance();
             }
         }
@@ -362,249 +369,232 @@ impl<'tok> SymbolParser<'tok> {
 }
 
 fn classify_declaration_chunk(tokens: &[GuardedToken]) -> Option<Symbol> {
-    let first = tokens.first()?;
-    let guards = first.guards.to_vec();
+    DeclarationParser::new(tokens).parse()
+}
 
-    let mut significant = tokens
-        .iter()
-        .filter(|guarded| {
-            !matches!(
-                guarded.token,
-                Token::Semicolon
-                    | Token::LBrace
-                    | Token::RBrace
-                    | Token::LParen
-                    | Token::RParen
-                    | Token::LBracket
-                    | Token::RBracket
-                    | Token::Less
-                    | Token::Greater
-                    | Token::Comma
-                    | Token::Colon
-                    | Token::Equal
-                    | Token::Star
-                    | Token::Amp
-            )
-        })
-        .peekable();
+struct DeclarationParser<'tok> {
+    tokens: &'tok [GuardedToken<'tok>],
+    index: usize,
+}
 
-    let mut saw_template = false;
-    let mut saw_typedef = false;
-    let mut saw_using = false;
-    let mut saw_namespace = false;
+impl<'tok> DeclarationParser<'tok> {
+    fn new(tokens: &'tok [GuardedToken<'tok>]) -> Self {
+        Self { tokens, index: 0 }
+    }
 
-    while let Some(guarded) = significant.next() {
-        match guarded.token {
-            Token::Template => saw_template = true,
-            Token::Typedef => saw_typedef = true,
-            Token::Using => saw_using = true,
-            Token::Namespace => saw_namespace = true,
+    fn parse(&mut self) -> Option<Symbol> {
+        self.skip_decl_specifiers();
+
+        let Some(token) = self.consume_token() else {
+            return None;
+        };
+
+        match token.token {
             Token::Class => {
-                if let Some(name) = next_identifier(&mut significant) {
-                    return Some(Symbol {
-                        guards,
-                        kind: SymbolKind::Class { name },
-                    });
-                }
+                self.parse_class_like_symbol(|name| SymbolKind::Class { name })
             },
             Token::Struct => {
-                if let Some(name) = next_identifier(&mut significant) {
-                    return Some(Symbol {
-                        guards,
-                        kind: SymbolKind::Struct { name },
-                    });
-                }
+                self.parse_class_like_symbol(|name| SymbolKind::Struct { name })
             },
             Token::Union => {
-                if let Some(name) = next_identifier(&mut significant) {
-                    return Some(Symbol {
-                        guards,
-                        kind: SymbolKind::Union { name },
-                    });
-                }
-            }
-            Token::Concept => {
-                if let Some(name) = next_identifier(&mut significant) {
-                    return Some(Symbol {
-                        guards,
-                        kind: SymbolKind::Concept { name },
-                    });
-                }
-            }
+                self.parse_class_like_symbol(|name| SymbolKind::Union { name })
+            },
             Token::Enum => {
-                let mut scoped = false;
-
-                if let Some(next) = significant.peek() {
-                    scoped = matches!(next.token, Token::Class | Token::Struct);
-                    if scoped {
-                        significant.next();
-                    }
-                }
-
-                if let Some(name) = next_identifier(&mut significant) {
-                    return Some(Symbol {
-                        guards,
-                        kind: SymbolKind::Enum { name, scoped },
-                    });
-                }
+                self.parse_enum_symbol()
+            },
+            Token::Using => {
+                self.parse_using_declaration()
+            },
+            Token::Template => {
+                self.parse_template_declaration()
             }
-            Token::Identifier(name) if saw_using => {
-                return Some(Symbol {
-                    guards,
-                    kind: SymbolKind::Using {
-                        name: name.clone(),
-                        namespace: saw_namespace
-                    },
-                });
-            }
-            Token::Identifier(_) if saw_typedef => {
-                let name = last_identifier(tokens)?;
-                return Some(Symbol {
-                    guards,
-                    kind: SymbolKind::Typedef { name },
-                });
-            }
-            Token::Identifier(_) if saw_template => {
-                // Explicit instantiations/declarations commonly look like:
-                // template FMT_API auto foo(...) -> bar;
-                // Keep this broad and use the token before the first top-level '(' as the name.
-                if let Some(name) = name_before_first_paren(tokens) {
-                    return Some(Symbol {
-                        guards,
-                        kind: SymbolKind::Function { name },
-                    });
-                }
-            }
-            _ => {},
-        }
-    }
-
-    if let Some(name) = name_before_first_paren(tokens) {
-        return Some(Symbol {
-            guards,
-            kind: SymbolKind::Function { name },
-        });
-    }
-
-    if let Some(name) = variable_name(tokens) {
-        return Some(Symbol {
-            guards,
-            kind: SymbolKind::Variable { name },
-        });
-    }
-
-    None
-}
-
-fn next_identifier<'a>(tokens: &mut impl Iterator<Item = &'a GuardedToken<'a>>) -> Option<String> {
-    for guarded in tokens {
-        if let Token::Identifier(name) = &guarded.token {
-            return Some(name.clone());
-        }
-    }
-
-    None
-}
-
-fn last_identifier(tokens: &[GuardedToken]) -> Option<String> {
-    tokens.iter().rev().find_map(|guarded| {
-        if let Token::Identifier(name) = &guarded.token {
-            Some(name.clone())
-        } else {
-            None
-        }
-    })
-}
-
-fn name_before_first_paren(tokens: &[GuardedToken]) -> Option<String> {
-    let paren_index = tokens
-        .iter()
-        .position(|guarded| matches!(guarded.token, Token::LParen))?;
-
-    tokens[..paren_index].iter().rev().find_map(|guarded| {
-        if let Token::Identifier(name) = &guarded.token {
-            Some(name.clone())
-        } else {
-            None
-        }
-    })
-}
-
-fn variable_name(tokens: &[GuardedToken<'_>]) -> Option<String> {
-    let declarator_start = first_variable_declarator_start(tokens)?;
-
-    tokens[declarator_start..]
-        .iter()
-        .take_while(|guarded| {
-            !matches!(
-                guarded.token,
-                Token::Equal
-                    | Token::Comma
-                    | Token::Semicolon
-                    | Token::LBrace
-                    | Token::RBrace
-            )
-        })
-        .filter_map(|guarded| {
-            if let Token::Identifier(name) = guarded.token {
-                Some(name.clone())
-            } else {
+            _ => {
                 None
             }
-        })
-        .last()
-}
-
-fn first_variable_declarator_start<'a>(tokens: &'a [GuardedToken<'a>]) -> Option<usize> {
-    let mut saw_typeish_token = false;
-
-    for (index, guarded) in tokens.iter().enumerate() {
-        match guarded.token {
-            Token::Identifier(_) => {
-                if saw_typeish_token && !identifier_is_probably_macro_attribute(tokens, index) {
-                    return Some(index);
-                }
-
-                saw_typeish_token = true;
-            }
-            Token::Auto
-            | Token::Const
-            | Token::Volatile
-            | Token::Constexpr
-            | Token::Consteval
-            | Token::Constinit
-            | Token::Static
-            | Token::Extern
-            | Token::Inline
-            | Token::Mutable
-            | Token::Typename
-            | Token::Class
-            | Token::Struct
-            | Token::Enum
-            | Token::Union => {
-                saw_typeish_token = true;
-            }
-            Token::Star | Token::Amp | Token::DoubleColon | Token::Less | Token::Greater => {}
-            Token::LParen | Token::RParen | Token::LBracket | Token::RBracket => {}
-            _ => {}
         }
     }
 
-    None
-}
+    fn parse_class_like_symbol(&mut self, constructor: impl FnOnce(String) -> SymbolKind) -> Option<Symbol> {
+        if let Some(GuardedToken { guards, token: Token::Identifier(name) }) = self.consume_token().map(|token| token) {
+            if matches!(self.peek_token()?.token, Token::Less | Token::DoubleColon) {
+                // If we see this then we're likely creating a partial specialization, which we
+                // can't export.
+                return None;
+            }
 
-fn identifier_is_probably_macro_attribute(tokens: &[GuardedToken<'_>], index: usize) -> bool {
-    let Some(Token::Identifier(name)) = tokens.get(index).map(|guarded| guarded.token) else {
-        return false;
-    };
-
-    if !name.chars().all(|ch| ch.is_ascii_uppercase() || ch == '_' || ch.is_ascii_digit()) {
-        return false;
+            Some(Symbol {
+                guards: guards.to_vec(),
+                kind: constructor(name.clone())
+            })
+        } else {
+            None
+        }
     }
 
-    tokens
-        .get(index + 1)
-        .is_some_and(|guarded| matches!(guarded.token, Token::Identifier(_) | Token::Auto | Token::Const))
+    fn parse_enum_symbol(&mut self) -> Option<Symbol> {
+        let Some(token) = self.peek_token() else {
+            return None;
+        };
+
+        match token.token {
+            Token::Identifier(name) => {
+                return Some(Symbol {
+                    guards: token.guards.to_vec(),
+                    kind: SymbolKind::Enum {
+                        name: name.clone(),
+                        scoped: false
+                    }
+                })
+            }
+            Token::Class | Token::Struct => {
+                self.advance();
+            }
+            _ => {
+                return None;
+            }
+        }
+
+        let Some(Token::Identifier(name)) = self.peek_token().map(|token| token.token) else {
+            return None;
+        };
+
+        Some(Symbol {
+            guards: token.guards.to_vec(),
+            kind: SymbolKind::Enum {
+                name: name.clone(),
+                scoped: true
+            }
+        })
+    }
+
+    fn parse_using_declaration(&mut self) -> Option<Symbol> {
+        let Some(token) = self.peek_token().map(|token| token) else {
+            return None;
+        };
+
+        if *token.token == Token::Namespace {
+            self.advance();
+            let name = self.parse_scoped_identifier()?;
+
+            if self.peek_token().is_some_and(|token| *token.token == Token::Equal) {
+                self.advance();
+                let target = self.parse_scoped_identifier()?;
+                return Some(Symbol {
+                    guards: token.guards.to_vec(),
+                    kind: SymbolKind::NamespaceAlias { name, target }
+                });
+            }
+
+            return Some(Symbol {
+                guards: token.guards.to_vec(),
+                kind: SymbolKind::UsingNamespace { name }
+            });
+        }
+
+        let name = self.parse_scoped_identifier()?;
+
+        if self.peek_token().is_some_and(|token| *token.token == Token::Equal) {
+            return Some(Symbol {
+                guards: token.guards.to_vec(),
+                kind: SymbolKind::TypeAlias { name }
+            });
+        }
+
+        Some(Symbol {
+            guards: token.guards.to_vec(),
+            kind: SymbolKind::UsingDeclaration { name }
+        })
+    }
+
+    fn parse_template_declaration(&mut self) -> Option<Symbol> {
+        self.skip_balanced_set(Token::Less, Token::Greater);
+
+        // TODO: Skip the requires clause if one is present
+        self.parse()
+    }
+
+    fn parse_scoped_identifier(&mut self) -> Option<String> {
+        let mut name = String::new();
+
+        while let Some(token) = self.peek_token() {
+            match token.token {
+                Token::Identifier(segment) => {
+                    name.push_str(&segment);
+                    self.advance();
+                }
+                Token::DoubleColon => {
+                    self.advance();
+                    name.push(':');
+                    name.push(':');
+                }
+                _ => {
+                    break;
+                }
+            }
+        }
+
+        if name.is_empty() {
+            return None;
+        }
+
+        Some(name)
+    }
+
+    fn skip_decl_specifiers(&mut self) {
+        loop {
+            match self.peek_token().map(|token| token.token) {
+                Some(Token::Inline) |
+                    Some(Token::Static)
+                | Some(Token::Extern)
+                | Some(Token::Constexpr)
+                | Some(Token::Friend)
+                | Some(Token::Virtual) => {
+                    self.advance();
+                }
+                Some(Token::Explicit) => {
+                    self.advance();
+                    self.skip_balanced_set(Token::LParen, Token::RParen);
+                }
+                _ => break
+            }
+        }
+    }
+
+    fn skip_balanced_set(&mut self, open: Token, close: Token) {
+        if !self.peek_token().is_some_and(|token| *token.token == open) {
+            return;
+        }
+
+        let mut depth = 1usize;
+        self.advance();
+
+        while let Some(token) = self.consume_token() {
+            if *token.token == open {
+                depth += 1;
+            } else if *token.token == close {
+                depth = depth.saturating_sub(1);
+
+                if depth == 0 {
+                    break;
+                }
+            }
+        }
+    }
+
+    fn peek_token(&self) -> Option<GuardedToken<'tok>> {
+        self.tokens.get(self.index).map(|token| token.clone())
+    }
+
+    fn consume_token(&mut self) -> Option<GuardedToken<'tok>> {
+        self.tokens.get(self.index).map(|token| token.clone()).and_then(|token| {
+            self.advance();
+            Some(token)
+        })
+    }
+
+    fn advance(&mut self) {
+        self.index += 1;
+    }
 }
 
 pub fn parse_symbols<'tok>(input: &'tok [GuardedToken<'tok>]) -> Result<Vec<Symbol>, SymbolError<'tok>>

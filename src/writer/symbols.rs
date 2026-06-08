@@ -56,20 +56,21 @@ impl<'a, W: Write> SymbolWriteContext<'a, W> {
             SymbolKind::Class { name }
             | SymbolKind::Struct { name }
             | SymbolKind::Union { name }
-            | SymbolKind::Typedef { name }
+            | SymbolKind::TypeAlias { name }
             | SymbolKind::Function { name }
             | SymbolKind::Variable { name }
             | SymbolKind::Concept { name }
             | SymbolKind::Enum { name, .. } => {
-                self.writer.write_fmt(format_args!("using {namespace_name}::{name};\n"))?;
+                self.writer.write_fmt(format_args!("export using {namespace_name}::{name};\n"))?;
             }
-            SymbolKind::Using { name, namespace } => {
-                if *namespace {
-                    self.writer.write_fmt(format_args!("using namespace {name};\n"))?;
-                }
-                else {
-                    self.writer.write_fmt(format_args!("using {namespace_name}::{name};\n"))?;
-                }
+            SymbolKind::UsingDeclaration { name } => {
+                self.writer.write_fmt(format_args!("export using {name};\n"))?;
+            }
+            SymbolKind::UsingNamespace { name } => {
+                self.writer.write_fmt(format_args!("export using namespace {name};\n"))?;
+            }
+            SymbolKind::NamespaceAlias { name, target } => {
+                self.writer.write_fmt(format_args!("export namespace {name} = {target};\n"))?;
             }
         }
 
