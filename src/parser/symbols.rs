@@ -81,182 +81,284 @@ pub struct Symbol {
     pub kind: SymbolKind,
 }
 
-fn token<'tok, I>(
-    expected: Token,
-) -> impl Parser<'tok, I, GuardedToken<'tok>, extra::Err<Rich<'tok, GuardedToken<'tok>>>> + Clone
-where
-    I: ValueInput<'tok, Token = GuardedToken<'tok>, Span = SimpleSpan>,
-{
-    any().filter(move |guarded: &GuardedToken<'tok>| *guarded.token == expected)
+struct SymbolParser<'tok> {
+    tokens: &'tok [GuardedToken<'tok>],
+    index: usize,
 }
 
-fn identifier<'tok, I>()
--> impl Parser<'tok, I, String, extra::Err<Rich<'tok, GuardedToken<'tok>>>> + Clone
-where
-    I: ValueInput<'tok, Token = GuardedToken<'tok>, Span = SimpleSpan>,
-{
-    any().filter_map(|guarded: GuardedToken<'tok>| match guarded.token {
-        Token::Identifier(name) => Some(name.clone()),
-        _ => None,
-    })
-}
+impl<'tok> SymbolParser<'tok> {
+    fn new(tokens: &'tok [GuardedToken<'tok>]) -> Self {
+        Self { tokens, index: 0 }
+    }
 
-fn scoped_identifier<'tok, I>()
--> impl Parser<'tok, I, String, extra::Err<Rich<'tok, GuardedToken<'tok>>>> + Clone
-where
-    I: ValueInput<'tok, Token = GuardedToken<'tok>, Span = SimpleSpan>,
-{
-    identifier()
-        .separated_by(token(Token::DoubleColon))
-        .collect::<Vec<_>>()
-        .map(|parts: Vec<String>| parts.join("::"))
-}
+    fn parse(mut self) -> Vec<Symbol> {
+        self.parse_until(None)
+    }
 
-fn balanced_group<'tok, I>(
-    open: Token,
-    close: Token,
-) -> impl Parser<'tok, I, (), extra::Err<Rich<'tok, GuardedToken<'tok>>>> + Clone
-where
-    I: ValueInput<'tok, Token = GuardedToken<'tok>, Span = SimpleSpan>,
-{
-    recursive(move |group| {
-        token(open.clone())
-            .ignore_then(
-                choice((
-                    group,
-                    any()
-                        .filter({
-                            let open = open.clone();
-                            let close = close.clone();
-                            move |guarded: &GuardedToken<'tok>| {
-                                *guarded.token != open && *guarded.token != close
+    fn parse_until(&mut self, end: Option<Token>) -> Vec<Symbol> {
+        let mut symbols = Vec::new();
+
+        while !self.is_at_end() {
+            if let Some(end) = &end {
+                if self.check(end) {
+                    break;
+                }
+            }
+
+            if self.is_at_end() {
+                break;
+            }
+
+            if let Some(symbol) = self.parse_symbol() {
+                symbols.push(symbol);
+            } else {
+                self.advance();
+            }
+        }
+
+        symbols
+    }
+
+    fn parse_symbol(&mut self) -> Option<Symbol> {
+        if self.check(&Token::Inline) && self.check_next(&Token::Namespace) {
+            return self.parse_namespace();
+        }
+
+        if self.check(&Token::Namespace) {
+            return self.parse_namespace();
+        }
+
+        let chunk = self.collect_declaration_chunk();
+
+        if chunk.is_empty() {
+            return None;
+        }
+
+        classify_declaration_chunk(chunk)
+    }
+
+    fn parse_namespace(&mut self) -> Option<Symbol> {
+        let first = self.peek()?.clone();
+
+        let is_inline = self.match_token(&Token::Inline);
+
+        if !self.match_token(&Token::Namespace) {
+            return None;
+        }
+
+        let name = self.parse_scoped_identifier()?;
+
+        self.skip_attributes();
+
+        if !self.match_token(&Token::LBrace) {
+            return Some(Symbol {
+                guards: first.guards.to_vec(),
+                kind: SymbolKind::Namespace(Namespace {
+                    name,
+                    is_inline,
+                    symbols: Vec::new(),
+                }),
+            })
+        }
+
+        let symbols = self.parse_until(Some(Token::RBrace));
+        self.match_token(&Token::RBrace);
+
+        Some(Symbol {
+            guards: first.guards.to_vec(),
+            kind: SymbolKind::Namespace(Namespace {
+                name,
+                is_inline,
+                symbols,
+            }),
+        })
+    }
+
+    fn collect_declaration_chunk(&mut self) -> &'tok [GuardedToken<'tok>] {
+        let start = self.index;
+
+        let mut paren_depth = 0usize;
+        let mut bracket_depth = 0usize;
+        let mut angle_depth = 0usize;
+        let mut brace_depth = 0usize;
+
+        while let Some(guarded) = self.peek() {
+            match guarded.token {
+                Token::Semicolon
+                if paren_depth == 0
+                    && bracket_depth == 0
+                    && angle_depth == 0
+                    && brace_depth == 0 =>
+                    {
+                        self.advance();
+                        break;
+                    }
+
+                Token::LBrace
+                if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 =>
+                    {
+                        brace_depth += 1;
+                        self.advance();
+
+                        while brace_depth > 0 {
+                            let Some(guarded) = self.peek() else {
+                                break;
+                            };
+
+                            match guarded.token {
+                                Token::LBrace => brace_depth += 1,
+                                Token::RBrace => brace_depth -= 1,
+                                _ => {}
                             }
-                        })
-                        .ignored(),
-                ))
-                    .repeated(),
-            )
-            .then_ignore(token(close.clone()))
-            .ignored()
-    })
-}
 
-fn declaration_chunk<'tok, I>()
-    -> impl Parser<'tok, I, &'tok [GuardedToken<'tok>], extra::Err<Rich<'tok, GuardedToken<'tok>>>> + Clone
-where
-    I: ValueInput<'tok, Token = GuardedToken<'tok>, Span = SimpleSpan>
-    + SliceInput<'tok, Slice = &'tok [GuardedToken<'tok>]>,
-{
-    choice((
-        balanced_group(Token::LParen, Token::RParen),
-        balanced_group(Token::LBracket, Token::RBracket),
-        balanced_group(Token::Less, Token::Greater),
-        balanced_group(Token::LBrace, Token::RBrace),
-        any()
-            .filter(|guarded: &GuardedToken<'tok>| {
-                !matches!(
-                    guarded.token,
-                    Token::Semicolon
-                        | Token::LParen
-                        | Token::RParen
-                        | Token::LBracket
-                        | Token::RBracket
-                        | Token::Less
-                        | Token::Greater
-                        | Token::LBrace
-                        | Token::RBrace
-                )
-            })
-            .ignored(),
-    ))
-        .repeated()
-        .at_least(1)
-        .then_ignore(token(Token::Semicolon).or_not())
-        .to_slice()
-}
+                            self.advance();
+                        }
 
-fn attribute<'tok, I>()
-    -> impl Parser<'tok, I, String, extra::Err<Rich<'tok, GuardedToken<'tok>>>> + Clone
-where
-    I: ValueInput<'tok, Token = GuardedToken<'tok>, Span = SimpleSpan>,
-{
-    token(Token::LBracket)
-        .repeated()
-        .exactly(2)
-        .ignore_then(scoped_identifier())
-        .then_ignore(token(Token::RBracket).repeated().exactly(2))
-}
+                        if self.check(&Token::Semicolon) {
+                            self.advance();
+                        }
 
-fn attribute_list<'tok, I>()
-    -> impl Parser<'tok, I, Vec<String>, extra::Err<Rich<'tok, GuardedToken<'tok>>>> + Clone
-where
-    I: ValueInput<'tok, Token = GuardedToken<'tok>, Span = SimpleSpan>,
-{
-    attribute().repeated().collect()
-}
+                        break;
+                    }
 
-fn unknown_syntax<'tok, I>()
--> impl Parser<'tok, I, (), extra::Err<Rich<'tok, GuardedToken<'tok>>>> + Clone
-where
-    I: ValueInput<'tok, Token = GuardedToken<'tok>, Span = SimpleSpan>,
-{
-    recursive(|unknown| {
-        let balanced_braces = token(Token::LBrace)
-            .ignore_then(unknown.repeated())
-            .ignore_then(token(Token::RBrace))
-            .ignored();
+                Token::RBrace
+                if paren_depth == 0
+                    && bracket_depth == 0
+                    && angle_depth == 0
+                    && brace_depth == 0 =>
+                    {
+                        break;
+                    }
 
-        let single_token = any()
-            .filter(|guarded: &GuardedToken<'tok>| {
-                !matches!(guarded.token, Token::LBrace | Token::RBrace)
-            })
-            .ignored();
+                Token::LParen => {
+                    paren_depth += 1;
+                    self.advance();
+                }
+                Token::RParen => {
+                    paren_depth = paren_depth.saturating_sub(1);
+                    self.advance();
+                }
+                Token::LBracket => {
+                    bracket_depth += 1;
+                    self.advance();
+                }
+                Token::RBracket => {
+                    bracket_depth = bracket_depth.saturating_sub(1);
+                    self.advance();
+                }
+                Token::Less => {
+                    angle_depth += 1;
+                    self.advance();
+                }
+                Token::Greater => {
+                    angle_depth = angle_depth.saturating_sub(1);
+                    self.advance();
+                }
+                _ => {
+                    self.advance();
+                }
+            }
+        }
 
-        choice((balanced_braces, single_token))
-    })
-}
+        &self.tokens[start..self.index]
+    }
 
-fn symbol_definition<'tok, I>()
--> impl Parser<'tok, I, Option<Symbol>, extra::Err<Rich<'tok, GuardedToken<'tok>>>> + Clone
-where
-    I: ValueInput<'tok, Token = GuardedToken<'tok>, Span = SimpleSpan>
-    + SliceInput<'tok, Slice = &'tok [GuardedToken<'tok>]>,
-{
-    recursive(|symbol| {
-        let namespace_definition = token(Token::Inline)
-            .or_not()
-            .map(|inline| inline.is_some())
-            .then(token(Token::Namespace))
-            .then(scoped_identifier())
-            .then_ignore(attribute_list().or_not())
-            .then_ignore(token(Token::LBrace))
-            .then(
-                symbol
-                    .repeated()
-                    .collect::<Vec<_>>()
-                    .map(|items| items.into_iter().filter_map(|item| item).collect()),
-            )
-            .then_ignore(token(Token::RBrace))
-            .map(|(((is_inline, t), name), symbols)| {
-                Some(Symbol {
-                    guards: t.guards.to_vec(),
-                    kind: SymbolKind::Namespace(Namespace {
-                        name,
-                        is_inline,
-                        symbols,
-                    }),
-                })
-            });
+    fn parse_scoped_identifier(&mut self) -> Option<String> {
+        let mut parts = Vec::new();
 
-        let declaration = declaration_chunk()
-            .map(classify_declaration_chunk);
+        let Token::Identifier(name) = self.peek()?.token else {
+            return None;
+        };
 
-        let unknown_symbol = unknown_syntax().to(None);
+        parts.push(name.clone());
+        self.advance();
 
-        choice((namespace_definition,
-                declaration,
-                unknown_symbol))
-    })
+        while self.match_token(&Token::DoubleColon) {
+            let Some(guarded) = self.peek() else {
+                break;
+            };
+
+            let Token::Identifier(name) = guarded.token else {
+                break;
+            };
+
+            parts.push(name.clone());
+            self.advance();
+        }
+
+        Some(parts.join("::"))
+    }
+
+    fn skip_attributes(&mut self) {
+        loop {
+            let start = self.index;
+
+            if !self.match_token(&Token::LBracket) {
+                return;
+            }
+
+            if !self.match_token(&Token::LBracket) {
+                self.index = start;
+                return;
+            }
+
+            let mut depth = 1usize;
+
+            while let Some(guarded) = self.peek() {
+                match guarded.token {
+                    Token::LBracket => depth += 1,
+                    Token::RBracket => {
+                        depth = depth.saturating_sub(1);
+
+                        if depth == 0 {
+                            self.advance();
+
+                            if self.check(&Token::RBracket) {
+                                self.advance();
+                            }
+
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+
+                self.advance();
+            }
+        }
+    }
+
+    fn match_token(&mut self, expected: &Token) -> bool {
+        if self.check(expected) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn check(&self, expected: &Token) -> bool {
+        self.peek()
+            .is_some_and(|guarded| *guarded.token == *expected)
+    }
+
+    fn check_next(&self, expected: &Token) -> bool {
+        self.tokens
+            .get(self.index + 1)
+            .is_some_and(|guarded| *guarded.token == *expected)
+    }
+
+    fn peek(&self) -> Option<&GuardedToken<'tok>> {
+        self.tokens.get(self.index)
+    }
+
+    fn advance(&mut self) {
+        self.index += 1;
+    }
+
+    fn is_at_end(&self) -> bool {
+        self.index >= self.tokens.len()
+    }
 }
 
 fn classify_declaration_chunk(tokens: &[GuardedToken]) -> Option<Symbol> {
@@ -388,7 +490,7 @@ fn classify_declaration_chunk(tokens: &[GuardedToken]) -> Option<Symbol> {
         return Some(Symbol {
             guards,
             kind: SymbolKind::Variable { name },
-        });   
+        });
     }
 
     None
@@ -505,24 +607,13 @@ fn identifier_is_probably_macro_attribute(tokens: &[GuardedToken<'_>], index: us
         .is_some_and(|guarded| matches!(guarded.token, Token::Identifier(_) | Token::Auto | Token::Const))
 }
 
-pub fn parse_symbols<'tok, I>(input: I) -> Result<Vec<Symbol>, SymbolError<'tok>>
-where
-    I: ValueInput<'tok, Token = GuardedToken<'tok>, Span = SimpleSpan>
-    + SliceInput<'tok, Slice = &'tok [GuardedToken<'tok>]>,
+pub fn parse_symbols<'tok>(input: &'tok [GuardedToken<'tok>]) -> Result<Vec<Symbol>, SymbolError<'tok>>
 {
     eprintln!("parse_symbols: starting");
 
-    let result = symbol_definition()
-        .repeated()
-        .collect::<Vec<_>>()
-        .map(|symbols: Vec<Option<Symbol>>| {
-            symbols.into_iter().filter_map(|symbol| symbol).collect()
-        })
-        .parse(input)
-        .into_result()
-        .map_err(|err| SymbolError { errors: err });
+    let result = SymbolParser::new(input).parse();
 
     eprintln!("parse_symbols: finished");
 
-    result
+    Ok(result)
 }
