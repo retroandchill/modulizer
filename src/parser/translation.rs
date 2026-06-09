@@ -309,7 +309,7 @@ impl<'a> TranslationUnitState<'a> {
         let mut seen_symbols = HashMap::new();
         for symbol in raw_symbols {
             if let SymbolKind::Namespace(mut namespace) = symbol.kind {
-                if namespace.symbols.is_empty() {
+                if namespace.is_empty() {
                     continue;
                 }
 

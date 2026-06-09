@@ -29,7 +29,7 @@ pub struct FileHeaderConfig {
     #[serde(default)]
     pub include_dirs: Vec<PathBuf>,
 
-    #[serde(with = "serde_regex")]
+    #[serde(default, with = "serde_regex")]
     pub header_guard_format: Option<Regex>,
 }
 

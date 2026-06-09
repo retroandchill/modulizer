@@ -69,7 +69,7 @@ impl<'a, W: Write> SymbolWriteContext<'a, W> {
             SymbolKind::UsingNamespace => {
                 self.writer.write_fmt(format_args!("export using namespace {name};\n"))?;
             }
-            SymbolKind::NamespaceAlias { target } => {
+            SymbolKind::NamespaceAlias(target) => {
                 self.writer.write_fmt(format_args!("export namespace {name} = {target};\n"))?;
             }
         }

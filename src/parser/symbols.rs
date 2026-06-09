@@ -27,15 +27,28 @@ pub struct Namespace {
     pub symbols: Vec<Symbol>,
 }
 
+impl Namespace {
+    pub fn is_empty(&self) -> bool {
+        if self.symbols.is_empty() {
+            return true;
+        }
+        
+        return self.symbols.iter().all(|symbol| {
+            if let SymbolKind::Namespace(ns) = &symbol.kind {
+                return ns.is_empty();
+            }
+            false
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum SymbolKind {
     Namespace(Namespace),
     ExportableSymbol,
     UsingNamespace,
     UsingDeclaration,
-    NamespaceAlias {
-        target: String,
-    }
+    NamespaceAlias(String)
 }
 
 #[derive(Debug, Clone)]
@@ -229,9 +242,22 @@ impl<'tok> SymbolParser<'tok> {
             return None;
         }
 
-        let name = self.parse_scoped_identifier()?;
+        let mut name = self.parse_scoped_identifier()?;
 
         self.parser.skip_attributes();
+
+        if self.parser.match_token(&Token::Equal) {
+            if name.len() != 1 {
+                return None;
+            }
+
+            let target = self.parse_scoped_identifier()?;
+            return Some(Symbol {
+                name: name.pop().unwrap(),
+                guards: first.guards.to_vec(),
+                kind: SymbolKind::NamespaceAlias(target.join("::"))
+            })
+        }
 
         if !self.parser.match_token(&Token::LBrace) {
             return Some(extract_namespace(first.guards, is_inline, name, Vec::new()))
@@ -240,6 +266,7 @@ impl<'tok> SymbolParser<'tok> {
         let symbols = self.parse_until(Some(Token::RBrace));
         self.parser.match_token(&Token::RBrace);
 
+        name.reverse();
         Some(extract_namespace(first.guards, is_inline, name, symbols))
     }
 
@@ -474,17 +501,6 @@ impl<'tok> DeclarationParser<'tok> {
         if *token.token == Token::Namespace {
             self.parser.advance();
             let name = self.parse_scoped_identifier()?;
-
-            if self.parser.peek().is_some_and(|token| *token.token == Token::Equal) {
-                self.parser.advance();
-                let target = self.parse_scoped_identifier()?;
-                return Some(Symbol {
-                    name,
-                    guards: token.guards.to_vec(),
-                    kind: SymbolKind::NamespaceAlias { target }
-                });
-            }
-
             return Some(Symbol {
                 name,
                 guards: token.guards.to_vec(),
@@ -526,6 +542,7 @@ impl<'tok> DeclarationParser<'tok> {
                 })
             }
             Token::LParen => {
+                self.parser.advance();
                 self.try_get_function_pointer_name()
                     .map(|name| Symbol {
                         name: name.clone(),
@@ -776,6 +793,21 @@ impl<'tok> DeclarationParser<'tok> {
     }
     
     fn skip_type_specifier(&mut self) {
+        loop {
+            let Some(token) = self.parser.peek() else {
+                return;
+            };
+
+            match token.token {
+                Token::Const | Token::Volatile => {
+                    self.parser.advance();
+                }
+                _ => {
+                    break;
+                }
+            }
+        }
+
         self.parser.match_token(&Token::DoubleColon);
 
         loop {
@@ -784,17 +816,14 @@ impl<'tok> DeclarationParser<'tok> {
             };
 
             match token.token {
-                Token::Typename |  Token::Template | Token::Star | Token::Amp | Token::Const | Token::Volatile => {
+                Token::Typename |  Token::Template => {
                     self.parser.advance()
                 },
                 Token::Decltype => {
                     self.parser.advance();
                     self.skip_balanced_set(Token::LParen, Token::RParen);
 
-                    if self.parser.match_token(&Token::DoubleColon) {
-                        self.parser.advance();
-                    }
-                    else {
+                    if !self.parser.match_token(&Token::DoubleColon) {
                         break;
                     }
                 }
@@ -802,12 +831,24 @@ impl<'tok> DeclarationParser<'tok> {
                     self.parser.advance();
                     self.skip_template_arguments();
                     
-                    if self.parser.match_token(&Token::DoubleColon) {
-                        self.parser.advance();
-                    }
-                    else {
+                    if !self.parser.match_token(&Token::DoubleColon) {
                         break;
                     }
+                }
+                _ => {
+                    break;
+                }
+            }
+        }
+
+        loop {
+            let Some(token) = self.parser.peek() else {
+                return;
+            };
+
+            match token.token {
+                Token::Star | Token::Amp | Token::Const | Token::Volatile => {
+                    self.parser.advance();
                 }
                 _ => {
                     break;
