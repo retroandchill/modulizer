@@ -32,7 +32,7 @@ impl Namespace {
         if self.symbols.is_empty() {
             return true;
         }
-        
+
         return self.symbols.iter().all(|symbol| {
             if let SymbolKind::Namespace(ns) = &symbol.kind {
                 return ns.is_empty();
@@ -586,7 +586,7 @@ impl<'tok> DeclarationParser<'tok> {
             Token::Auto => {
                 self.parser.advance();
             }
-            Token::Decltype | Token::Typename | Token::DoubleColon | Token::Identifier(_) => {
+            Token::Decltype | Token::Typename | Token::DoubleColon | Token::Const | Token::Volatile | Token::Identifier(_)  => {
                 self.skip_type_specifier();
             }
             _ => {
@@ -601,14 +601,7 @@ impl<'tok> DeclarationParser<'tok> {
         match name_token.token {
             Token::Identifier(name) => {
                 match self.parser.peek().map(|token| token.token) {
-                    Some(Token::Equal) | Some(Token::Semicolon) | None => {
-                        Some(Symbol {
-                            name: name.clone(),
-                            guards: name_token.guards.to_vec(),
-                            kind: SymbolKind::ExportableSymbol
-                        })
-                    },
-                    Some(Token::LParen) => {
+                    Some(Token::Equal) | Some(Token::Semicolon) | Some(Token::LParen) | Some(Token::LBracket) | None => {
                         Some(Symbol {
                             name: name.clone(),
                             guards: name_token.guards.to_vec(),

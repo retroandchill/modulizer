@@ -120,7 +120,7 @@ pub enum Token {
     NumberLiteral(String),
 
     // Identifiers.
-    #[regex(r"[A-Za-z_][A-Za-z0-9_]*", |lex| lex.slice().to_string())]
+    #[regex(r"([A-Za-z_][A-Za-z0-9_]*|(signed|unsigned)?(char|(short|long|long long)?int|short|long|long long))", |lex| lex.slice().to_string())]
     Identifier(String),
 
     // Multi-character operators and punctuation.
@@ -138,7 +138,7 @@ pub enum Token {
 
     #[token("&&")]
     And,
-    
+
     #[token("||")]
     Or,
 
