@@ -60,14 +60,7 @@ impl<'a, W: Write> SymbolWriteContext<'a, W> {
                     self.writer.write_all(b"}\n")?;
                 }
             }
-            SymbolKind::Class
-            | SymbolKind::Struct
-            | SymbolKind::Union
-            | SymbolKind::TypeAlias
-            | SymbolKind::Function
-            | SymbolKind::Variable
-            | SymbolKind::Concept
-            | SymbolKind::Enum { .. } => {
+            SymbolKind::ExportableSymbol => {
                 self.writer.write_fmt(format_args!("export using {namespace_name}::{name};\n"))?;
             }
             SymbolKind::UsingDeclaration => {

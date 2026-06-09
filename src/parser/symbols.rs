@@ -1,30 +1,19 @@
-use crate::parser::grammar::{GuardedToken, PreprocessorGuard, Token};
-use chumsky::error::Rich;
-use chumsky::Parser;
 use std::fmt;
+use crate::parser::grammar::{GuardedToken, PreprocessorGuard, Token};
 use std::fmt::Write;
-use clap::builder::TypedValueParser;
 
 #[derive(Debug)]
-pub struct SymbolError<'tok> {
-    pub errors: Vec<Rich<'tok, GuardedToken<'tok>>>,
+pub struct SymbolError {
+    pub error: String
 }
 
-impl<'tok> fmt::Display for SymbolError<'tok> {
+impl fmt::Display for SymbolError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(
-            f,
-            "Multiple errors occurred (count: {}):",
-            self.errors.len()
-        )?;
-        for err in &self.errors {
-            writeln!(f, "  * {err}")?;
-        }
-        Ok(())
+        write!(f, "{}", self.error)
     }
 }
 
-impl<'tok> std::error::Error for SymbolError<'tok> {}
+impl std::error::Error for SymbolError{}
 
 #[derive(Debug, Clone)]
 pub struct CppNameSegment {
@@ -41,21 +30,12 @@ pub struct Namespace {
 #[derive(Debug, Clone)]
 pub enum SymbolKind {
     Namespace(Namespace),
-    Class,
-    Struct,
-    Union,
-    Enum {
-        scoped: bool,
-    },
-    TypeAlias,
+    ExportableSymbol,
     UsingNamespace,
     UsingDeclaration,
     NamespaceAlias {
         target: String,
-    },
-    Function,
-    Variable,
-    Concept
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -400,15 +380,15 @@ impl<'tok> DeclarationParser<'tok> {
         match token.token {
             Token::Class => {
                 self.parser.advance();
-                self.parse_class_like_symbol(SymbolKind::Class)
+                self.parse_class_like_symbol()
             },
             Token::Struct => {
                 self.parser.advance();
-                self.parse_class_like_symbol(SymbolKind::Struct)
+                self.parse_class_like_symbol()
             },
             Token::Union => {
                 self.parser.advance();
-                self.parse_class_like_symbol(SymbolKind::Union)
+                self.parse_class_like_symbol()
             },
             Token::Enum => {
                 self.parser.advance();
@@ -418,6 +398,10 @@ impl<'tok> DeclarationParser<'tok> {
                 self.parser.advance();
                 self.parse_using_declaration()
             },
+            Token::Typedef => {
+                self.parser.advance();
+                self.parse_typedef_declaration()
+            }
             Token::Concept => {
                 self.parser.advance();
                 self.parse_concept_declaration()
@@ -432,7 +416,7 @@ impl<'tok> DeclarationParser<'tok> {
         }
     }
 
-    fn parse_class_like_symbol(&mut self, kind: SymbolKind) -> Option<Symbol> {
+    fn parse_class_like_symbol(&mut self) -> Option<Symbol> {
         if let Some(GuardedToken { guards, token: Token::Identifier(name) }) = self.parser.consume().map(|token| token) {
             if matches!(self.parser.peek()?.token, Token::Less | Token::DoubleColon) {
                 // If we see this then we're likely creating a partial specialization, which we
@@ -443,7 +427,7 @@ impl<'tok> DeclarationParser<'tok> {
             Some(Symbol {
                 name: name.clone(),
                 guards: guards.to_vec(),
-                kind
+                kind: SymbolKind::ExportableSymbol
             })
         } else {
             None
@@ -460,9 +444,7 @@ impl<'tok> DeclarationParser<'tok> {
                 return Some(Symbol {
                     name: name.clone(),
                     guards: token.guards.to_vec(),
-                    kind: SymbolKind::Enum {
-                        scoped: false
-                    }
+                    kind: SymbolKind::ExportableSymbol
                 })
             }
             Token::Class | Token::Struct => {
@@ -480,9 +462,7 @@ impl<'tok> DeclarationParser<'tok> {
         Some(Symbol {
             name: name.clone(),
             guards: token.guards.to_vec(),
-            kind: SymbolKind::Enum {
-                scoped: true
-            }
+            kind: SymbolKind::ExportableSymbol
         })
     }
 
@@ -518,7 +498,7 @@ impl<'tok> DeclarationParser<'tok> {
             return Some(Symbol {
                 name,
                 guards: token.guards.to_vec(),
-                kind: SymbolKind::TypeAlias
+                kind: SymbolKind::ExportableSymbol
             });
         }
 
@@ -527,6 +507,34 @@ impl<'tok> DeclarationParser<'tok> {
             guards: token.guards.to_vec(),
             kind: SymbolKind::UsingDeclaration
         })
+    }
+
+    fn parse_typedef_declaration(&mut self) -> Option<Symbol> {
+        self.skip_decl_specifiers();
+        self.skip_type_specifier();
+
+        let Some(token) = self.parser.peek() else {
+            return None;
+        };
+
+        match token.token {
+            Token::Identifier(name) => {
+                Some(Symbol {
+                    name: name.clone(),
+                    guards: token.guards.to_vec(),
+                    kind: SymbolKind::ExportableSymbol
+                })
+            }
+            Token::LParen => {
+                self.try_get_function_pointer_name()
+                    .map(|name| Symbol {
+                        name: name.clone(),
+                        guards: token.guards.to_vec(),
+                        kind: SymbolKind::ExportableSymbol
+                    })
+            }
+            _ => None
+        }
     }
     
     fn parse_concept_declaration(&mut self) -> Option<Symbol> {
@@ -541,7 +549,7 @@ impl<'tok> DeclarationParser<'tok> {
         Some(Symbol {
             name: name.clone(),
             guards: token.guards.to_vec(),
-            kind: SymbolKind::Concept
+            kind: SymbolKind::ExportableSymbol
         })
     }
 
@@ -580,20 +588,28 @@ impl<'tok> DeclarationParser<'tok> {
                         Some(Symbol {
                             name: name.clone(),
                             guards: name_token.guards.to_vec(),
-                            kind: SymbolKind::Variable
+                            kind: SymbolKind::ExportableSymbol
                         })
                     },
                     Some(Token::LParen) => {
                         Some(Symbol {
                             name: name.clone(),
                             guards: name_token.guards.to_vec(),
-                            kind: SymbolKind::Function
+                            kind: SymbolKind::ExportableSymbol
                         })
                     }
                     _ => {
                         None
                     }
                 }
+            }
+            Token::LParen => {
+                self.try_get_function_pointer_name()
+                        .map(|name: &String| Symbol {
+                            name: name.clone(),
+                            guards: name_token.guards.to_vec(),
+                            kind: SymbolKind::ExportableSymbol
+                        })
             }
             Token::Operator => {
                 let start = self.parser.index;
@@ -625,14 +641,45 @@ impl<'tok> DeclarationParser<'tok> {
                 Some(Symbol {
                     name,
                     guards: name_token.guards.to_vec(),
-                    kind: SymbolKind::Function
+                    kind: SymbolKind::ExportableSymbol
                 })
             }
             _ => {
-                return None;
+                None
             }
         }
 
+    }
+
+    fn try_get_function_pointer_name(&mut self) -> Option<&String> {
+        let mut depth = 1usize;
+        let mut is_function_pointer = self.parser.peek().map(|token| *token.token == Token::Star).unwrap_or(false);
+        let mut function_pointer_name = None;
+        loop {
+            let Some(token) = self.parser.consume() else {
+                return None;
+            };
+            match token.token {
+                Token::LParen => {
+                    depth += 1;
+                }
+                Token::RParen => {
+                    depth = depth.saturating_sub(1);
+
+                    if depth == 0 {
+                        return function_pointer_name
+                        ;
+                    }
+                },
+                Token::DoubleColon => {
+                    is_function_pointer = self.parser.peek().map(|token| *token.token == Token::Star).unwrap_or(false);
+                }
+                Token::Identifier(name) if is_function_pointer => {
+                    function_pointer_name = Some(name);
+                }
+                _ => {}
+            }
+        }
     }
 
     fn skip_template_arguments(&mut self) -> Option<()> {
@@ -737,7 +784,7 @@ impl<'tok> DeclarationParser<'tok> {
             };
 
             match token.token {
-                Token::Typename |  Token::Template => {
+                Token::Typename |  Token::Template | Token::Star | Token::Amp | Token::Const | Token::Volatile => {
                     self.parser.advance()
                 },
                 Token::Decltype => {
@@ -766,7 +813,6 @@ impl<'tok> DeclarationParser<'tok> {
                     break;
                 }
             }
-
         }
     }
 
@@ -842,7 +888,7 @@ impl<'tok> DeclarationParser<'tok> {
     }
 }
 
-pub fn parse_symbols<'tok>(input: &'tok [GuardedToken<'tok>]) -> Result<Vec<Symbol>, SymbolError<'tok>>
+pub fn parse_symbols<'tok>(input: &'tok [GuardedToken<'tok>]) -> Result<Vec<Symbol>, SymbolError>
 {
     eprintln!("parse_symbols: starting");
 
