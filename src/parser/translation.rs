@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::hash_map::Entry;
 use std::path::PathBuf;
 use itertools::Itertools;
 use logos::Logos;
@@ -6,7 +7,7 @@ use crate::config::Config;
 use crate::parser::grammar::{GuardedTokens, PreprocessorGuard, Token};
 use crate::parser::macros::{parse_expandable_syntax, ExpandableSyntax, MacroExpansionCandidate};
 use crate::parser::preprocessor::{collect_statements, parse_include_expansion, ConditionalDirective, DefineDirective, DirectiveStatement, IncludeDirective, IncludePath, MacroParameters, PreprocessorStatement};
-use crate::parser::symbols::{parse_symbols, Symbol};
+use crate::parser::symbols::{parse_symbols, Namespace, Symbol, SymbolKind};
 
 pub struct TranslationUnit {
     symbols: Vec<Symbol>,
@@ -298,7 +299,106 @@ impl<'a> TranslationUnitState<'a> {
         let raw_symbols = parse_symbols(tokens.as_slice())
             .map_err(|err| anyhow::anyhow!("Failed to parse symbols: {}", err))?;
 
-        Ok(raw_symbols)
+        let symbols = self.merge_symbol_sets(raw_symbols, "", false);
+
+        Ok(symbols)
+    }
+
+    fn merge_symbol_sets(&self, raw_symbols: Vec<Symbol>, parent_scope: &str, parent_is_excluded: bool) -> Vec<Symbol> {
+        let mut symbols = Vec::with_capacity(raw_symbols.len());
+        let mut seen_symbols = HashMap::new();
+        for symbol in raw_symbols {
+            if let SymbolKind::Namespace(mut namespace) = symbol.kind {
+                if namespace.symbols.is_empty() {
+                    continue;
+                }
+
+                if let Some(Symbol { kind: SymbolKind::Namespace(existing_namespace), guards, .. }) = seen_symbols.get(symbol.name.as_str())
+                    .and_then(|index| -> Option<&mut Symbol> { symbols.get_mut(*index) }) {
+                    existing_namespace.symbols.append(&mut namespace.symbols);
+                    reduce_guard_set(guards, symbol.guards);
+                } else {
+                    seen_symbols.insert(symbol.name.clone(), symbols.len());
+                    symbols.push(Symbol {
+                        name: symbol.name,
+                        guards: symbol.guards,
+                        kind: SymbolKind::Namespace(namespace),
+                    });
+                }
+            } else {
+                if let Entry::Vacant(slot) = seen_symbols.entry(symbol.name.clone()) {
+                    slot.insert(symbols.len());
+                    symbols.push(symbol);
+                }
+            }
+        }
+
+        let mut final_symbols = Vec::with_capacity(symbols.len());
+        for symbol in symbols {
+            let current_scope = if parent_scope.is_empty() {
+                symbol.name.clone()
+            } else {
+                format!("{}::{}", parent_scope, symbol.name)
+            };
+            let is_excluded = parent_is_excluded || self.config.symbols.exclude.contains(&current_scope);
+            if is_excluded && (self.config.symbols.include.contains(&current_scope) || !self.config.symbols.include.iter().any(|include| include.starts_with(format!("{}::", current_scope).as_str()))) {
+                continue;
+            }
+
+            if let SymbolKind::Namespace(namespace) = symbol.kind {
+                let mut merged_symbols = self.merge_symbol_sets(namespace.symbols, &current_scope, is_excluded);
+                let mut name = symbol.name;
+                if merged_symbols.len() == 1 {
+                    if let Some(Symbol { kind: SymbolKind::Namespace(sub_namespace), name: sub_name, guards }) = merged_symbols.pop_if(|symbol| {
+                        matches!(symbol.kind, SymbolKind::Namespace(_))
+                    }) {
+                        if !sub_namespace.is_inline {
+                            merged_symbols = sub_namespace.symbols;
+                            name = format!("{}::{}", name, sub_name);
+                        }
+                        else {
+                            merged_symbols.push(Symbol {
+                                name: sub_name,
+                                guards,
+                                kind: SymbolKind::Namespace(sub_namespace),
+                            });
+                        }
+                    }
+                }
+                final_symbols.push(Symbol {
+                    name,
+                    guards: symbol.guards,
+                    kind: SymbolKind::Namespace(Namespace {
+                        is_inline: namespace.is_inline,
+                        symbols: merged_symbols,
+                    }),
+                });
+            } else {
+                final_symbols.push(symbol);
+            }
+        }
+
+        final_symbols
+    }
+}
+
+fn reduce_guard_set(existing: &mut Vec<PreprocessorGuard>, new: Vec<PreprocessorGuard>) {
+    if existing.is_empty() {
+        return;
+    }
+
+    let reduced_index = existing.iter().zip(new.iter())
+        .enumerate()
+        .filter(|(_, (existing, new))| {
+            **existing != **new
+        })
+        .map(|(i, _)| i)
+        .next();
+
+    if let Some(index) = reduced_index {
+        existing.drain(index..);
+    } else {
+        existing.clear();
     }
 }
 

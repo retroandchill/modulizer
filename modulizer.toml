@@ -22,10 +22,10 @@ header_guard_format = "FMT_(\\w+)_H_"
 
 [macros]
 expand_from_definition = [
-    "FMT_BEGIN_NAMESPACE",
-    "FMT_END_NAMESPACE"
 ]
 explicit_macros = [
+    "FMT_BEGIN_NAMESPACE=namespace fmt {",
+    "FMT_END_NAMESPACE=}",
     "FMT_API",
     "FMT_EXPORT",
     "FMT_BEGIN_EXPORT",
@@ -37,4 +37,9 @@ explicit_macros = [
     "FMT_CONSTEVAL=consteval",
     "FMT_CONSTEXPR20=constexpr",
     "FMT_ALWAYS_INLINE=inline"
+]
+
+[symbols]
+exclude = [
+    "fmt::detail"
 ]

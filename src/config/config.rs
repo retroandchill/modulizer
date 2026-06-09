@@ -12,6 +12,7 @@ pub struct Config {
     pub module: ModuleConfig,
     pub headers: HeaderConfig,
     pub macros: MacroConfig,
+    pub symbols: SymbolConfig,
 }
 
 #[derive(Debug)]
@@ -50,6 +51,12 @@ pub struct HeaderConfig {
 pub struct MacroConfig {
     pub expand_from_definition: HashSet<String>,
     pub explicit_macros: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct SymbolConfig {
+    pub exclude: HashSet<String>,
+    pub include: HashSet<String>,
 }
 
 impl Config {
@@ -104,6 +111,16 @@ impl Config {
                 macros: MacroConfig {
                     explicit_macros,
                     expand_from_definition,
+                },
+                symbols: SymbolConfig {
+                    exclude: cli.exclude_symbols.into_iter()
+                        .chain(source_config.symbols.exclude)
+                        .unique()
+                        .collect(),
+                    include: cli.include_symbols.into_iter()
+                        .chain(source_config.symbols.include)
+                        .unique()
+                        .collect(),
                 }
             })
     }

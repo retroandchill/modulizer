@@ -20,7 +20,7 @@ impl<'a, W: Write> SymbolWriteContext<'a, W> {
 
     pub fn emit_symbols<'b>(&mut self, symbols: impl IntoIterator<Item = &'b Symbol>) -> std::io::Result<()> {
         for symbol in symbols {
-            self.emit_symbol(symbol, "")?;
+            self.emit_symbol(symbol, "", "")?;
         }
 
         self.update_guards(&[])
@@ -30,46 +30,53 @@ impl<'a, W: Write> SymbolWriteContext<'a, W> {
         &mut self,
         symbol: &Symbol,
         namespace_name: &str,
+        full_scope: &str
     ) -> std::io::Result<()> {
         self.update_guards(&symbol.guards)?;
 
+        let name = symbol.name.as_str();
+        let current_scope = if full_scope.is_empty() {
+            full_scope.to_string()
+        } else {
+            format!("{}::{}", full_scope, name)
+        };
         match &symbol.kind {
             SymbolKind::Namespace(namespace) => {
-                if namespace.is_inline {
-                    self.writer.write_all(b"inline ")?;
+                if !namespace.is_inline {
+                    self.writer
+                        .write_fmt(format_args!("namespace {}\n", name))?;
+                    self.writer.write_all(b"{\n")?;
+                    self.writer.indent();
                 }
 
-                self.writer
-                    .write_fmt(format_args!("namespace {}\n", namespace.name))?;
-                self.writer.write_all(b"{\n")?;
-                self.writer.indent();
-
                 for symbol in &namespace.symbols {
-                    self.emit_symbol(symbol, &namespace.name)?;
+                    self.emit_symbol(symbol, name, &current_scope)?;
                 }
 
                 self.update_guards(&symbol.guards)?;
 
-                self.writer.dedent();
-                self.writer.write_all(b"}\n")?;
+                if !namespace.is_inline {
+                    self.writer.dedent();
+                    self.writer.write_all(b"}\n")?;
+                }
             }
-            SymbolKind::Class { name }
-            | SymbolKind::Struct { name }
-            | SymbolKind::Union { name }
-            | SymbolKind::TypeAlias { name }
-            | SymbolKind::Function { name }
-            | SymbolKind::Variable { name }
-            | SymbolKind::Concept { name }
-            | SymbolKind::Enum { name, .. } => {
+            SymbolKind::Class
+            | SymbolKind::Struct
+            | SymbolKind::Union
+            | SymbolKind::TypeAlias
+            | SymbolKind::Function
+            | SymbolKind::Variable
+            | SymbolKind::Concept
+            | SymbolKind::Enum { .. } => {
                 self.writer.write_fmt(format_args!("export using {namespace_name}::{name};\n"))?;
             }
-            SymbolKind::UsingDeclaration { name } => {
+            SymbolKind::UsingDeclaration => {
                 self.writer.write_fmt(format_args!("export using {name};\n"))?;
             }
-            SymbolKind::UsingNamespace { name } => {
+            SymbolKind::UsingNamespace => {
                 self.writer.write_fmt(format_args!("export using namespace {name};\n"))?;
             }
-            SymbolKind::NamespaceAlias { name, target } => {
+            SymbolKind::NamespaceAlias { target } => {
                 self.writer.write_fmt(format_args!("export namespace {name} = {target};\n"))?;
             }
         }

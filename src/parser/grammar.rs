@@ -95,6 +95,9 @@ pub enum Token {
     #[token("auto")]
     Auto,
 
+    #[token("decltype")]
+    Decltype,
+
     #[token("operator")]
     Operator,
 
@@ -132,6 +135,12 @@ pub enum Token {
     
     #[token("==")]
     EqualEqual,
+
+    #[token("&&")]
+    And,
+    
+    #[token("||")]
+    Or,
 
     #[token("(")]
     LParen,
@@ -252,6 +261,7 @@ impl fmt::Display for Token {
                 Token::Constexpr => "constexpr",
                 Token::Consteval => "consteval",
                 Token::Constinit => "constinit",
+                Token::Decltype => "decltype",
                 Token::Auto => "auto",
                 Token::Operator => "operator",
                 Token::Public => "public",
@@ -266,6 +276,8 @@ impl fmt::Display for Token {
                 Token::Ellipsis => "...",
                 Token::Arrow => "->",
                 Token::EqualEqual => "==",
+                Token::And => "&&",
+                Token::Or => "||",
                 Token::LParen => "(",
                 Token::RParen => ")",
                 Token::LBrace => "{",

@@ -43,10 +43,12 @@ pub struct CliArgs {
     pub headers: Vec<PathBuf>,
 
     /// Add a symbol to export.
-    #[arg(long = "export-symbol")]
-    pub export_symbols: Vec<String>,
+    #[arg(long = "exclude-symbol")]
+    pub exclude_symbols: Vec<String>,
 
-    /// Add a namespace to export.
-    #[arg(long = "export-namespace")]
-    pub export_namespaces: Vec<String>,
+    /// Add a symbol to export.
+    #[arg(long = "include-symbol")]
+    pub include_symbols: Vec<String>,
+    
+    
 }

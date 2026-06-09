@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use serde::Deserialize;
 use regex::Regex;
@@ -10,6 +11,8 @@ pub struct FileConfig {
     pub headers: FileHeaderConfig,
     #[serde(default)]
     pub macros: FileMacroConfig,
+    #[serde(default)]
+    pub symbols: FileSymbolConfig,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -37,6 +40,14 @@ pub struct FileMacroConfig {
 
     #[serde(default)]
     pub explicit_macros: Vec<String>
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct FileSymbolConfig {
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    #[serde(default)]
+    pub include: Vec<String>,
 }
 
 impl FileConfig {
