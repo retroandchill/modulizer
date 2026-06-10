@@ -1,7 +1,6 @@
 use std::fmt;
 use crate::parser::grammar::{GuardedToken, PreprocessorGuard, Token};
 use std::fmt::Write;
-use std::thread::Scope;
 
 #[derive(Debug)]
 pub struct SymbolError {
@@ -249,11 +248,48 @@ impl<'tok> SymbolParser<'tok> {
     }
 
     fn parse_typedef(&mut self) -> Option<Symbol> {
-        None
+        let declaration = self.expect(Token::Typedef)?;
+
+        let mut depth = 0usize;
+        let mut name = None;
+        while !self.is_at_end() && !self.check(&Token::Semicolon) && depth > 0 {
+            match &self.tokens[self.index].token {
+                Token::LBrace => depth += 1,
+                Token::RBrace => depth = depth.saturating_sub(1),
+                Token::Identifier(n) => {
+                    name = Some(n)
+                }
+                _ => {}
+            }
+            self.advance();
+        }
+
+        name.map(|name| Symbol {
+            name: name.clone(),
+            guards: declaration.guards.to_vec(),
+            kind: SymbolKind::ExportableSymbol,
+        })
     }
 
     fn parse_concept(&mut self) -> Option<Symbol> {
-        None
+        let declaration = self.expect(Token::Concept)?;
+
+        let name = match self.peek()?.token {
+            Token::Identifier(name) => {
+                self.advance();
+                Some(name)
+            }
+            _ => None,
+        }?;
+
+        self.expect(Token::Equal)?;
+        self.skip_until_semicolon();
+
+        Some(Symbol {
+            name: name.clone(),
+            guards: declaration.guards.to_vec(),
+            kind: SymbolKind::ExportableSymbol,
+        })
     }
 
     fn parse_scope(&mut self) -> Vec<Symbol> {
@@ -298,7 +334,7 @@ impl<'tok> SymbolParser<'tok> {
     }
 
     fn skip_until_semicolon(&mut self) {
-        let mut depth = 1usize;
+        let mut depth = 0usize;
         while !self.is_at_end() && !self.check(&Token::Semicolon) && depth > 0 {
             match &self.tokens[self.index].token {
                 Token::LBrace => depth += 1,
@@ -310,7 +346,6 @@ impl<'tok> SymbolParser<'tok> {
     }
 
     fn parse_qualified_name(&mut self) -> Option<Vec<String>> {
-        let start = self.index;
         let mut parts = Vec::new();
 
         let Token::Identifier(name) = self.peek()?.token else {
@@ -385,7 +420,7 @@ impl<'tok> SymbolParser<'tok> {
     }
 
     fn expect(&mut self, expected: Token) -> Option<GuardedToken<'tok>> {
-        if !(self.check(&expected)) {
+        if !self.check(&expected) {
             return None;
         }
 
@@ -405,23 +440,8 @@ impl<'tok> SymbolParser<'tok> {
             .is_some_and(|guarded| *guarded.token == *expected)
     }
 
-    fn current(&self) -> Option<&Token> {
-        self.tokens.get(self.index).map(|guarded| guarded.token)
-    }
-
     fn peek(&self) -> Option<GuardedToken<'tok>> {
         self.tokens.get(self.index).map(|guarded| guarded.clone())
-    }
-
-    fn peek_next(&self) -> Option<GuardedToken<'tok>> {
-        self.tokens.get(self.index + 1).map(|guarded| guarded.clone())
-    }
-
-    fn consume(&mut self) -> Option<GuardedToken<'tok>> {
-        self.peek().map(|guarded| {
-            self.advance();
-            guarded
-        })
     }
 
     fn advance(&mut self) {
