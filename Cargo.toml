@@ -13,3 +13,11 @@ logos = "0.16.1"
 chumsky = "0.13.0"
 regex = "1.12.3"
 serde_regex = "1.2.0"
+clang = { workspace = true, features = ["clang_17_0"]}
+tempfile = "3.27.0"
+
+[workspace]
+members = ["clang-rs"]
+dependencies = {
+    clang = { workspace = true, path = "clang-rs" }
+}

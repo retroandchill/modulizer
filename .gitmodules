@@ -1,3 +1,6 @@
 [submodule "samples/fmt"]
 	path = samples/fmt
 	url = https://github.com/fmtlib/fmt
+[submodule "clang-rs"]
+	path = clang-rs
+	url = https://github.com/retroandchill/clang-rs.git

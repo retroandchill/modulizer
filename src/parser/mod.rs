@@ -4,3 +4,4 @@ pub mod symbols;
 pub mod preprocessor;
 mod common;
 mod macros;
+pub mod extractor;
