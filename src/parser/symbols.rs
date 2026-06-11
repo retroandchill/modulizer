@@ -1,5 +1,5 @@
 use crate::parser::grammar::{GuardedToken, PreprocessorGuard, Token};
-use crate::parser::structure::{Delimiter, TokenGroup, TokenNode, collect_token_nodes};
+use crate::parser::structure::{Delimiter, TokenGroup, TokenNode, collect_token_nodes, strip_attributes};
 use chumsky::container::Seq;
 use chumsky::input::{BorrowInput, ValueInput};
 use chumsky::{IterParser, Parser};
@@ -138,13 +138,11 @@ impl<'a> SymbolParser<'a> {
         }
 
         let Some(mut names) = self.parse_qualified_name() else {
-            self.skip_attributes();
             self.expect_group(Delimiter::Braces)?;
             return None;
         };
         names.reverse();
 
-        self.skip_attributes();
         let group = self.expect_group(Delimiter::Braces)?;
         let sub_parser = SymbolParser::new(&group.children);
         let children = sub_parser.parse();
@@ -314,7 +312,7 @@ impl<'a> SymbolParser<'a> {
             Token::Enum => self.parse_enum(),
             Token::Using => self.parse_using(),
             Token::Concept => self.parse_concept(),
-            _ => None,
+            _ => self.parse_variable_or_function(),
         }
     }
 
@@ -486,7 +484,6 @@ impl<'a> SymbolParser<'a> {
 
     fn skip_qualifiers(&mut self) {
         loop {
-            self.skip_attributes();
             match self.try_peak_token().map(|token| token.token) {
                 Some(
                     Token::Constexpr
@@ -606,8 +603,6 @@ impl<'a> SymbolParser<'a> {
             self.expect_group(Delimiter::Parentheses);
         }
 
-        self.skip_attributes();
-
         if self.check_token(Token::Semicolon).is_some()
             || self.check_group(Delimiter::Braces).is_some()
         {
@@ -618,8 +613,6 @@ impl<'a> SymbolParser<'a> {
 
         Some(())
     }
-
-    fn skip_trailing_return_type(&mut self) {}
 
     fn skip_optional_scope(&mut self) {
         if self.check_group(Delimiter::Braces).is_some() {
@@ -661,24 +654,6 @@ impl<'a> SymbolParser<'a> {
         }
 
         Some(parts)
-    }
-
-    fn skip_attributes(&mut self) {
-        loop {
-            let Some(group) = self.check_group(Delimiter::Brackets) else {
-                break;
-            };
-
-            if group.children.len() != 1
-                && group.children[0]
-                    .try_get_group()
-                    .is_some_and(|group| group.delimiter != Delimiter::Brackets)
-            {
-                break;
-            }
-
-            self.advance();
-        }
     }
 
     fn expect_token(&mut self, expected: Token) -> Option<GuardedToken> {
@@ -762,6 +737,7 @@ pub fn parse_symbols<'tok>(input: &'tok [GuardedToken]) -> Result<Vec<Symbol>, S
     eprintln!("parse_symbols: starting");
 
     let nodes = collect_token_nodes(input);
+    let nodes = strip_attributes(nodes);
     let result = SymbolParser::new(&nodes).parse();
 
     eprintln!("parse_symbols: finished");

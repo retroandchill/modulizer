@@ -37,6 +37,10 @@ impl TokenNode {
             None
         }
     }
+    
+    pub fn is_attribute(&self) -> bool {
+        self.try_get_group().is_some_and(|group| group.delimiter == Delimiter::Brackets && group.children.len() == 1 && group.children[0].try_get_group().is_some_and(|group| group.delimiter == Delimiter::Braces))
+    }
 }
 
 pub fn collect_token_nodes(nodes: &[GuardedToken]) -> Vec<TokenNode> {
@@ -86,4 +90,16 @@ fn collect_until(nodes: &[GuardedToken], index: &mut usize, delimiter: Option<To
     }
 
     (false, result)
+}
+
+pub fn strip_attributes(tokens: Vec<TokenNode>) -> Vec<TokenNode> {
+    let mut nodes = Vec::with_capacity(tokens.len());
+    for node in tokens {
+        if node.is_attribute() {
+            continue;
+        }
+        
+        nodes.push(node);
+    }
+    nodes   
 }
