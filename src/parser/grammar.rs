@@ -1,6 +1,8 @@
 use logos::{Lexer, Logos};
 use std::fmt;
 use std::fmt::Formatter;
+use std::rc::Rc;
+use ustr::Ustr;
 use crate::parser::preprocessor::ConditionalDirective;
 
 #[derive(Logos, Clone, Debug, PartialEq)]
@@ -8,8 +10,8 @@ pub enum Token {
     #[regex(r"\r\n|\n|\r")]
     NewLine,
 
-    #[regex(r"[ \t\f]+", |lex| lex.slice().to_string())]
-    Whitespace(String),
+    #[regex(r"[ \t\f]+")]
+    Whitespace,
 
     #[regex(r"//[^\r\n]*", allow_greedy = true)]
     LineComment,
@@ -71,6 +73,9 @@ pub enum Token {
     #[token("static")]
     Static,
 
+    #[token("thread_local")]
+    ThreadLocal,
+
     #[token("explicit")]
     Explicit,
 
@@ -101,6 +106,12 @@ pub enum Token {
     #[token("operator")]
     Operator,
 
+    #[token("noexcept")]
+    Noexcept,
+
+    #[token("final")]
+    Final,
+
     #[token("public")]
     Public,
 
@@ -110,18 +121,72 @@ pub enum Token {
     #[token("private")]
     Private,
 
+    #[token("void")]
+    Void,
+
+    #[token("bool")]
+    Bool,
+
+    #[token("int")]
+    Int,
+
+    #[token("signed")]
+    Signed,
+
+    #[token("unsigned")]
+    Unsigned,
+
+    #[token("short")]
+    Short,
+
+    #[token("long")]
+    Long,
+
+    #[token("long long")]
+    LongLong,
+    
+    #[token("float")]
+    Float,
+    
+    #[token("double")]
+    Double,
+
+    #[token("char")]
+    Char,
+
+    #[token("wchar_t")]
+    WChar,
+
+    #[token("char8_t")]
+    Char8,
+
+    #[token("char16_t")]
+    Char16,
+
+    #[token("char32_t")]
+    Char32,
+    
+    #[token("new")]
+    New,
+    
+    #[token("delete")]
+    Delete,
+    
+    #[token("co_await")]
+    CoAwait,
+
     #[regex(r#"(u8|u|U|L)?""#, parse_string_literal)]
-    StringLiteral(String),
+    StringLiteral(Ustr),
 
-    #[regex(r"(u8|u|U|L)?'([^'\\]|\\.|\\\r?\n)*'", |lex| lex.slice().to_string())]
-    CharacterLiteral(String),
+    #[regex(r"(u8|u|U|L)?'([^'\\]|\\.|\\\r?\n)*'", |lex| Ustr::from(lex.slice()))]
+    CharacterLiteral(Ustr),
 
-    #[regex(r"([0-9][0-9']*)(\.[0-9']*)?([eEpP][+-]?[0-9']+)?[a-zA-Z_0-9]*", |lex| lex.slice().to_string())]
-    NumberLiteral(String),
+    #[regex(r"([0-9][0-9']*)(\.[0-9']*)?([eEpP][+-]?[0-9']+)?[a-zA-Z_0-9]*", |lex| Ustr::from(lex.slice()))]
+    NumberLiteral(Ustr),
 
     // Identifiers.
-    #[regex(r"[A-Za-z_][A-Za-z0-9_]*", |lex| lex.slice().to_string())]
-    Identifier(String),
+    #[regex(r"[A-Za-z_][A-Za-z0-9_]*", |lex| Ustr::from(lex.slice()))]
+    Identifier(Ustr),
 
     // Multi-character operators and punctuation.
     #[token("::")]
@@ -223,7 +288,7 @@ pub enum Token {
 
 impl Token {
     pub fn is_trivial(&self) -> bool {
-        matches!(self, Token::Whitespace(_) | Token::NewLine | Token::Continuation | Token::LineComment | Token::BlockComment)
+        matches!(self, Token::Whitespace | Token::NewLine | Token::Continuation | Token::LineComment | Token::BlockComment)
     }
 }
 
@@ -254,6 +319,7 @@ impl fmt::Display for Token {
                 Token::Virtual => "virtual",
                 Token::Extern => "extern",
                 Token::Static => "static",
+                Token::ThreadLocal => "thread_local",
                 Token::Explicit => "explicit",
                 Token::Const => "const",
                 Token::Mutable => "mutable",
@@ -267,7 +333,9 @@ impl fmt::Display for Token {
                 Token::Public => "public",
                 Token::Protected => "protected",
                 Token::Private => "private",
-                Token::Whitespace(str)
+                Token::Noexcept => "noexcept",
+                Token::Final => "final",
+                Token::Whitespace => " ",
                 | Token::StringLiteral(str)
                 | Token::CharacterLiteral(str)
                 | Token::NumberLiteral(str)
@@ -304,13 +372,31 @@ impl fmt::Display for Token {
                 Token::Question => "?",
                 Token::Backslash => "/",
                 Token::Continuation => "\\\n",
+                Token::Void => "void",
+                Token::Bool => "bool",
+                Token::Int => "int",
+                Token::Signed => "signed",
+                Token::Unsigned => "unsigned",
+                Token::Short => "short",
+                Token::Long => "long",
+                Token::LongLong => "long long",
+                Token::Float => "float",
+                Token::Double => "double",
+                Token::Char => "char",
+                Token::WChar => "wchar_t",
+                Token::Char8 => "char8_t",
+                Token::Char16 => "char16_t",
+                Token::Char32 => "char32_t",
+                Token::New => "new",
+                Token::Delete => "delete",
+                Token::CoAwait => "co_await",
             }
         )
     }
 }
 
 
-fn parse_string_literal(lex: &mut Lexer<Token>) -> Option<String> {
+fn parse_string_literal(lex: &mut Lexer<Token>) -> Option<Ustr> {
     let remainder = lex.remainder();
     let bytes = remainder.as_bytes();
 
@@ -331,7 +417,7 @@ fn parse_string_literal(lex: &mut Lexer<Token>) -> Option<String> {
     let end = end?;
     lex.bump(end);
 
-    Some(lex.slice().to_string())
+    Some(Ustr::from(lex.slice()))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -342,7 +428,7 @@ pub enum PreprocessorGuard {
 
 #[derive(Debug, Clone)]
 pub struct GuardedTokens {
-    guards: Vec<PreprocessorGuard>,
+    guards: Rc<[PreprocessorGuard]>,
     tokens: Vec<Token>,
 }
 
@@ -360,12 +446,12 @@ impl GuardedTokens {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct GuardedToken<'a> {
-    pub guards: &'a [PreprocessorGuard],
-    pub token: &'a Token,
+pub struct GuardedToken {
+    pub guards: Rc<[PreprocessorGuard]>,
+    pub token: Token,
 }
 
-impl<'a> fmt::Display for GuardedToken<'a> {
+impl fmt::Display for GuardedToken {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.token)
     }
@@ -377,7 +463,7 @@ pub struct GuardedTokenIterator<'a> {
 }
 
 impl<'a> Iterator for GuardedTokenIterator<'a> {
-    type Item = GuardedToken<'a>;
+    type Item = GuardedToken;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(index) = self.index {
@@ -389,13 +475,13 @@ impl<'a> Iterator for GuardedTokenIterator<'a> {
         
         let index = self.index.unwrap();
         self.tokens.tokens.get(index)
-            .map(|token| GuardedToken { guards: self.tokens.guards.as_slice(), token })
+            .map(|token| GuardedToken { guards: self.tokens.guards.clone(), token: token.clone() })
         
     }
 }
 
 impl<'a> IntoIterator for &'a GuardedTokens {
-    type Item = GuardedToken<'a>;
+    type Item = GuardedToken;
     type IntoIter = GuardedTokenIterator<'a>;
 
     fn into_iter(self) -> Self::IntoIter {

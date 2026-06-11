@@ -1,10 +1,22 @@
-use std::fmt;
 use crate::parser::grammar::{GuardedToken, PreprocessorGuard, Token};
+use crate::parser::structure::{Delimiter, TokenGroup, TokenNode, collect_token_nodes};
+use chumsky::container::Seq;
+use chumsky::input::{BorrowInput, ValueInput};
+use chumsky::{IterParser, Parser};
+use itertools::Itertools;
+use regex::bytes::Replacer;
+use std::fmt;
 use std::fmt::Write;
+use std::rc::Rc;
+use arraystring::ArrayString;
+use arraystring::typenum::U25;
+use ustr::Ustr;
+
+type OperatorOverloadName = ArrayString<U25>;
 
 #[derive(Debug)]
 pub struct SymbolError {
-    pub error: String
+    pub error: String,
 }
 
 impl fmt::Display for SymbolError {
@@ -13,12 +25,12 @@ impl fmt::Display for SymbolError {
     }
 }
 
-impl std::error::Error for SymbolError{}
+impl std::error::Error for SymbolError {}
 
 #[derive(Debug, Clone)]
 pub struct CppNameSegment {
     pub name: String,
-    pub has_template_args: bool
+    pub has_template_args: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -38,7 +50,7 @@ impl Namespace {
                 return ns.is_empty();
             }
             false
-        })
+        });
     }
 }
 
@@ -48,7 +60,7 @@ pub enum SymbolKind {
     ExportableSymbol,
     UsingNamespace,
     UsingDeclaration,
-    NamespaceAlias(String)
+    NamespaceAlias(String),
 }
 
 pub enum DeclarationTerminator {
@@ -58,19 +70,18 @@ pub enum DeclarationTerminator {
 
 #[derive(Debug, Clone)]
 pub struct Symbol {
-    pub name: String,
-    pub guards: Vec<PreprocessorGuard>,
+    pub name: Ustr,
+    pub guards: Rc<[PreprocessorGuard]>,
     pub kind: SymbolKind,
 }
 
-struct SymbolParser<'tok> {
-    tokens: &'tok [GuardedToken<'tok>],
+struct SymbolParser<'a> {
+    tokens: &'a [TokenNode],
     index: usize,
 }
 
-impl<'tok> SymbolParser<'tok> {
-    fn new(tokens: &'tok [GuardedToken<'tok>]) -> Self {
-
+impl<'a> SymbolParser<'a> {
+    fn new(tokens: &'a [TokenNode]) -> Self {
         Self { tokens, index: 0 }
     }
 
@@ -80,8 +91,7 @@ impl<'tok> SymbolParser<'tok> {
         while !self.is_at_end() {
             if let Some(symbol) = self.parse_symbol() {
                 symbols.push(symbol);
-            }
-            else {
+            } else {
                 self.advance();
             }
         }
@@ -90,14 +100,10 @@ impl<'tok> SymbolParser<'tok> {
     }
 
     fn parse_symbol(&mut self) -> Option<Symbol> {
-        match self.peek()?.token {
-            Token::Inline => {
-                if self.check_next(&Token::Namespace) {
-                    self.advance();
-                    return self.parse_namespace(true);
-                }
-
-                None
+        match self.try_peak_token()?.token {
+            Token::Inline if self.check_next_token(Token::Namespace).is_some() => {
+                self.advance();
+                self.parse_namespace(true)
             }
             Token::Namespace => self.parse_namespace(false),
             Token::Class => self.parse_class(),
@@ -106,159 +112,165 @@ impl<'tok> SymbolParser<'tok> {
             Token::Enum => self.parse_enum(),
             Token::Using => self.parse_using(),
             Token::Typedef => self.parse_typedef(),
-            Token::Concept => self.parse_concept(),
-            _ => None,
+            Token::Template => self.parse_template(),
+            _ => self.parse_variable_or_function(),
         }
     }
 
     fn parse_namespace(&mut self, is_inline: bool) -> Option<Symbol> {
-        let start = self.expect(Token::Namespace)?;
+        let start = self.expect_token(Token::Namespace)?;
 
-        if let Some(Token::Identifier(name)) = self.peek().map(|guarded| guarded.token) && self.check_next(&Token::Equal) {
+        if let Some(Token::Identifier(name)) = self.try_peak_token().map(|guarded| guarded.token)
+            && self.check_next_token(Token::Equal).is_some()
+        {
             self.advance();
-            self.expect(Token::Equal)?;
-            let target = self.parse_qualified_name()?.join("::");
+            self.expect_token(Token::Equal)?;
+            let target = self
+                .parse_qualified_name()?
+                .iter()
+                .map(|s| s.as_str())
+                .join("::");
             return Some(Symbol {
                 name: name.clone(),
-                guards: start.guards.to_vec(),
+                guards: start.guards,
                 kind: SymbolKind::NamespaceAlias(target),
             });
         }
 
         let Some(mut names) = self.parse_qualified_name() else {
             self.skip_attributes();
-            self.expect(Token::LBrace)?;
-            self.skip_scope();
-            self.expect(Token::RBrace)?;
-
+            self.expect_group(Delimiter::Braces)?;
             return None;
         };
         names.reverse();
 
         self.skip_attributes();
-        self.expect(Token::LBrace)?;
-        let children = self.parse_scope();
-        self.expect(Token::RBrace)?;
+        let group = self.expect_group(Delimiter::Braces)?;
+        let sub_parser = SymbolParser::new(&group.children);
+        let children = sub_parser.parse();
 
-        Some(extract_namespace(&start.guards, is_inline, names, children))
+        Some(extract_namespace(start.guards, is_inline, names, children))
     }
 
     fn parse_class(&mut self) -> Option<Symbol> {
-        let declaration = self.expect(Token::Class)?;
+        let declaration = self.expect_token(Token::Class)?;
         self.parse_class_or_struct(declaration)
     }
 
     fn parse_struct(&mut self) -> Option<Symbol> {
-        let declaration = self.expect(Token::Struct)?;
+        let declaration = self.expect_token(Token::Struct)?;
         self.parse_class_or_struct(declaration)
     }
 
-    fn parse_class_or_struct(&mut self, declaration: GuardedToken<'tok>) -> Option<Symbol> {
-        let name = match self.peek()?.token {
+    fn parse_class_or_struct(&mut self, declaration: GuardedToken) -> Option<Symbol> {
+        let name = match self.try_peak_token()?.token {
             Token::Identifier(name) => {
                 self.advance();
                 Some(name)
-            },
+            }
             _ => None,
         };
 
         // Skip over the base class list if present
+        if self.check_token(Token::DoubleColon).is_some() || self.check_token(Token::Less).is_some()
+        {
+            // This is probably a partial specialization, which can't be exported
+            return None;
+        }
         self.skip_optional_base_class_list();
         self.skip_optional_scope();
-        self.expect(Token::Semicolon)?;
+        self.expect_token(Token::Semicolon)?;
 
         name.map(|name| Symbol {
             name: name.clone(),
-            guards: declaration.guards.to_vec(),
+            guards: declaration.guards,
             kind: SymbolKind::ExportableSymbol,
         })
     }
 
     fn skip_optional_base_class_list(&mut self) {
-        while !self.check(&Token::Semicolon) && !self.check(&Token::LBrace) {
+        while !self.check_token(Token::Semicolon).is_some()
+            && !self.check_group(Delimiter::Braces).is_some()
+        {
             self.advance();
         }
     }
 
     fn parse_union(&mut self) -> Option<Symbol> {
-        let declaration = self.expect(Token::Union)?;
-        let name = match self.peek()?.token {
+        let declaration = self.expect_token(Token::Union)?;
+        let name = match self.try_peak_token()?.token {
             Token::Identifier(name) => {
                 self.advance();
                 Some(name)
-            },
+            }
             _ => None,
         };
 
         self.skip_optional_scope();
-        self.expect(Token::Semicolon)?;
+        self.expect_token(Token::Semicolon)?;
 
         name.map(|name| Symbol {
             name: name.clone(),
-            guards: declaration.guards.to_vec(),
+            guards: declaration.guards,
             kind: SymbolKind::ExportableSymbol,
         })
     }
 
     fn parse_enum(&mut self) -> Option<Symbol> {
-        let declaration = self.expect(Token::Enum)?;
+        let declaration = self.expect_token(Token::Enum)?;
 
-        if self.check(&Token::Class) || self.check(&Token::Struct) {
+        if self.check_token(Token::Class).is_some() || self.check_token(Token::Struct).is_some() {
             self.advance();
         }
         self.parse_class_or_struct(declaration)
     }
     fn parse_using(&mut self) -> Option<Symbol> {
-        self.expect(Token::Using)?;
+        self.expect_token(Token::Using)?;
 
-        let next = self.peek()?;
+        let next = self.try_peak_token()?;
         match next.token {
             Token::Namespace => {
                 self.advance();
                 let names = self.parse_qualified_name()?;
-                self.expect(Token::Semicolon)?;
+                self.expect_token(Token::Semicolon)?;
                 Some(Symbol {
-                    name: names.join("::"),
-                    guards: next.guards.to_vec(),
+                    name: Ustr::from(names.iter().map(|s| s.as_str()).join("::").as_str()),
+                    guards: next.guards,
                     kind: SymbolKind::UsingNamespace,
                 })
             }
             Token::Identifier(name) => {
-                if self.check_next(&Token::Equal) {
+                if self.check_next_token(Token::Equal).is_some() {
                     self.skip_until_semicolon();
                     Some(Symbol {
                         name: name.clone(),
-                        guards: next.guards.to_vec(),
+                        guards: next.guards,
                         kind: SymbolKind::ExportableSymbol,
                     })
                 } else {
                     let names = self.parse_qualified_name()?;
-                    self.expect(Token::Semicolon)?;
+                    self.expect_token(Token::Semicolon)?;
                     Some(Symbol {
-                        name: names.join("::"),
-                        guards: next.guards.to_vec(),
+                        name: Ustr::from(names.iter().map(|s| s.as_str()).join("::").as_str()),
+                        guards: next.guards,
                         kind: SymbolKind::UsingDeclaration,
                     })
                 }
             }
-            _ => {
-                None
-            }
+            _ => None,
         }
     }
 
     fn parse_typedef(&mut self) -> Option<Symbol> {
-        let declaration = self.expect(Token::Typedef)?;
+        let declaration = self.expect_token(Token::Typedef)?;
 
-        let mut depth = 0usize;
         let mut name = None;
-        while !self.is_at_end() && !self.check(&Token::Semicolon) && depth > 0 {
-            match &self.tokens[self.index].token {
-                Token::LBrace => depth += 1,
-                Token::RBrace => depth = depth.saturating_sub(1),
-                Token::Identifier(n) => {
-                    name = Some(n)
-                }
+        while !self.is_at_end() && !self.check_token(Token::Semicolon).is_some() {
+            match self.tokens[self.index]
+                .try_get_token()
+                .map(|token| token.token)
+            {
+                Some(Token::Identifier(n)) => name = Some(n),
                 _ => {}
             }
             self.advance();
@@ -266,15 +278,15 @@ impl<'tok> SymbolParser<'tok> {
 
         name.map(|name| Symbol {
             name: name.clone(),
-            guards: declaration.guards.to_vec(),
+            guards: declaration.guards,
             kind: SymbolKind::ExportableSymbol,
         })
     }
 
     fn parse_concept(&mut self) -> Option<Symbol> {
-        let declaration = self.expect(Token::Concept)?;
+        let declaration = self.expect_token(Token::Concept)?;
 
-        let name = match self.peek()?.token {
+        let name = match self.try_peak_token()?.token {
             Token::Identifier(name) => {
                 self.advance();
                 Some(name)
@@ -282,81 +294,361 @@ impl<'tok> SymbolParser<'tok> {
             _ => None,
         }?;
 
-        self.expect(Token::Equal)?;
+        self.expect_token(Token::Equal)?;
         self.skip_until_semicolon();
 
         Some(Symbol {
             name: name.clone(),
-            guards: declaration.guards.to_vec(),
+            guards: declaration.guards,
             kind: SymbolKind::ExportableSymbol,
         })
     }
 
-    fn parse_scope(&mut self) -> Vec<Symbol> {
-        let mut children = Vec::new();
-
-        while !self.is_at_end() && !self.check(&Token::RBrace) {
-            if let Some(symbol) = self.parse_symbol() {
-                children.push(symbol);
-            } else {
-                self.advance();
-            }
-        }
-
-        children
-    }
-
-    fn skip_optional_scope(&mut self) {
-        if self.check(&Token::LBrace) {
-            self.advance();
-            self.skip_scope();
-            self.advance();
+    fn parse_template(&mut self) -> Option<Symbol> {
+        self.expect_token(Token::Template)?;
+        self.parse_template_parameters()?;
+        match self.try_peak_token()?.token {
+            Token::Class => self.parse_class(),
+            Token::Struct => self.parse_struct(),
+            Token::Union => self.parse_union(),
+            Token::Enum => self.parse_enum(),
+            Token::Using => self.parse_using(),
+            Token::Concept => self.parse_concept(),
+            _ => None,
         }
     }
 
-    fn skip_scope(&mut self) {
+    fn parse_template_parameters(&mut self) -> Option<()> {
+        self.expect_token(Token::Less)?;
         let mut depth = 1usize;
-        while let Some(token) = self.peek() {
-            match token.token {
-                Token::LBrace => {
-                    depth += 1;
-                }
-                Token::RBrace => {
-                    depth = depth.saturating_sub(1);
-                    if depth == 0 {
-                        break;
-                    }
-                }
+        while depth > 0 {
+            match self.try_peak_token().map(|token| token.token) {
+                Some(Token::Less) => depth += 1,
+                Some(Token::Greater) => depth = depth.saturating_sub(1),
                 _ => {}
             }
+            self.advance();
+        }
+
+        Some(())
+    }
+
+    fn parse_variable_or_function(&mut self) -> Option<Symbol> {
+        self.skip_qualifiers();
+        let is_auto = self.parse_type_qualifier()?;
+
+        let identifier = self.try_peak_token()?;
+        match identifier.token {
+            Token::Identifier(name) => {
+                self.advance();
+                if self.check_token(Token::Semicolon).is_some() {
+                    self.advance();
+                } else if self.check_token(Token::Equal).is_some() {
+                    self.skip_until_semicolon();
+                } else if self.check_group(Delimiter::Parentheses).is_some() {
+                    self.advance();
+                    self.parse_function_body(is_auto)?;
+                }
+
+                Some(Symbol {
+                    name,
+                    guards: identifier.guards,
+                    kind: SymbolKind::ExportableSymbol,
+                })
+            }
+            Token::Operator => {
+                let name = self.parse_operator_overload_name()?;
+                self.expect_group(Delimiter::Parentheses)?;
+                self.parse_function_body(is_auto)?;
+                Some(Symbol {
+                    name,
+                    guards: identifier.guards,
+                    kind: SymbolKind::ExportableSymbol,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn parse_type_qualifier(&mut self) -> Option<bool> {
+        self.skip_optional_cv_qualifiers();
+        if let Some(is_auto) = self.parse_fundamental_type() {
+            self.skip_cv_ref_qualifiers();
+            return Some(is_auto);
+        }
+
+        // A type can optionally start with one of these
+        self.expect_token(Token::Typename);
+        self.expect_token(Token::DoubleColon);
+        let mut template_allowed = false;
+        loop {
+            match self.try_peak_token()?.token {
+                Token::Identifier(_) => {
+                    template_allowed = true;
+                    self.advance();
+                    self.parse_template_parameters();
+                }
+                Token::Decltype => {
+                    template_allowed = true;
+                    self.advance();
+                    self.expect_group(Delimiter::Parentheses)?;
+                }
+                Token::Template if template_allowed => {
+                    self.advance();
+                    continue;
+                }
+                _ => return None,
+            }
+
+            if self.check_token(Token::DoubleColon).is_none() {
+                break;
+            }
+            self.advance();
+
+            if self.check_token(Token::Star).is_some() {
+                break;
+            }
+        }
+
+        self.skip_cv_ref_qualifiers();
+
+        Some(false)
+    }
+
+    fn skip_optional_cv_qualifiers(&mut self) {
+        loop {
+            match self.try_peak_token().map(|token| token.token) {
+                Some(Token::Const | Token::Volatile) => {
+                    self.advance();
+                }
+                _ => break,
+            }
+        }
+    }
+
+    fn skip_cv_ref_qualifiers(&mut self) {
+        loop {
+            match self.try_peak_token().map(|token| token.token) {
+                Some(Token::Star | Token::Amp | Token::And | Token::Const | Token::Volatile) => {
+                    self.advance();
+                }
+                _ => break,
+            }
+        }
+    }
+
+    fn parse_fundamental_type(&mut self) -> Option<bool> {
+        match self.try_peak_token().map(|token| token.token) {
+            Some(Token::Auto) => {
+                self.advance();
+                Some(true)
+            }
+            Some(
+                Token::Void
+                | Token::Bool
+                | Token::Int
+                | Token::Float
+                | Token::Double
+                | Token::Char
+                | Token::WChar
+                | Token::Char8
+                | Token::Char16
+                | Token::Char32,
+            ) => {
+                self.advance();
+                Some(false)
+            }
+            Some(Token::Signed | Token::Unsigned) => {
+                self.advance();
+                self.parse_sign_modified_type();
+                Some(false)
+            }
+            Some(Token::Short | Token::Long | Token::LongLong) => {
+                self.advance();
+                self.expect_token(Token::Int);
+                Some(false)
+            }
+            _ => None,
+        }
+    }
+
+    fn parse_sign_modified_type(&mut self) {
+        match self.try_peak_token().map(|token| token.token) {
+            Some(Token::Int | Token::Char) => {
+                self.advance();
+            }
+            Some(Token::Short | Token::Long | Token::LongLong) => {
+                self.advance();
+            }
+            _ => {}
+        }
+    }
+
+    fn skip_qualifiers(&mut self) {
+        loop {
+            self.skip_attributes();
+            match self.try_peak_token().map(|token| token.token) {
+                Some(
+                    Token::Constexpr
+                    | Token::Consteval
+                    | Token::Constinit
+                    | Token::Inline
+                    | Token::Static,
+                ) => {
+                    self.advance();
+                }
+                Some(Token::Extern) => {
+                    self.advance();
+                    if let Some(Token::StringLiteral(_)) =
+                        self.try_peak_token().map(|token| token.token)
+                    {
+                        self.advance();
+                    }
+                }
+                Some(Token::Explicit) => {
+                    self.advance();
+                    self.expect_group(Delimiter::Parentheses);
+                }
+                _ => break,
+            }
+        }
+    }
+
+    fn parse_operator_overload_name(&mut self) -> Option<Ustr> {
+        self.expect_token(Token::Operator)?;
+        match self.peek()? {
+            TokenNode::Token(guarded) => {
+                match guarded.token {
+                    Token::New => {
+                        self.advance();
+                        if self.check_group(Delimiter::Brackets).is_some_and(|group| group.children.is_empty()) {
+                            self.advance();
+                            return Some(Ustr::from("operator new[]"));
+                        }
+
+                        Some(Ustr::from("operator new"))
+                    }
+                    Token::Delete => {
+                        self.advance();
+                        if self.check_group(Delimiter::Brackets).is_some_and(|group| group.children.is_empty()) {
+                            self.advance();
+                            return Some(Ustr::from("operator delete[]"));
+                        }
+
+                        Some(Ustr::from("operator delete"))
+                    }
+                    Token::CoAwait => {
+                        self.advance();
+                        Some(Ustr::from("operator co_await"))
+                    }
+                    _ => {
+                        let mut buffer = OperatorOverloadName::new();
+                        buffer.push_str("operator");
+                        loop {
+                            let next = self.peek()?;
+                            match next {
+                                TokenNode::Token(token) => {
+                                    self.advance();
+                                    buffer.write_fmt(format_args!("{}", token.token)).ok()?;
+                                }
+                                TokenNode::Group(group) => {
+                                    if group.delimiter == Delimiter::Parentheses {
+                                        break;
+                                    }
+                                    else {
+                                        return None;
+                                    }
+                                }
+                            }
+                        }
+
+                        Some(Ustr::from( buffer.as_str() ) )
+                    }
+                }
+            }
+            TokenNode::Group(group) => {
+                if !group.children.is_empty() {
+                    return None;
+                }
+
+                match group.delimiter {
+                    Delimiter::Parentheses => {
+                        self.advance();
+                        Some(Ustr::from("operator()"))
+                    },
+                    Delimiter::Brackets => {
+                        self.advance();
+                        Some(Ustr::from("operator[]"))
+                    },
+                    Delimiter::Braces => {
+                        None
+                    }
+                }
+            }
+        }
+    }
+
+    fn parse_function_body(&mut self, is_auto: bool) -> Option<()> {
+        if is_auto {
+            if self.expect_token(Token::Arrow).is_some() {
+                self.parse_type_qualifier()?;
+            }
+        }
+
+        self.skip_optional_cv_qualifiers();
+        if let Some(Token::Amp | Token::And) =
+            self.try_peak_token().map(|token| token.token)
+        {
+            self.advance();
+        }
+
+        if self.expect_token(Token::Noexcept).is_some() {
+            self.expect_group(Delimiter::Parentheses);
+        }
+
+        self.skip_attributes();
+
+        if self.check_token(Token::Semicolon).is_some()
+            || self.check_group(Delimiter::Braces).is_some()
+        {
+            self.advance();
+        } else {
+            return None;
+        }
+
+        Some(())
+    }
+
+    fn skip_trailing_return_type(&mut self) {}
+
+    fn skip_optional_scope(&mut self) {
+        if self.check_group(Delimiter::Braces).is_some() {
             self.advance();
         }
     }
 
     fn skip_until_semicolon(&mut self) {
-        let mut depth = 0usize;
-        while !self.is_at_end() && !self.check(&Token::Semicolon) && depth > 0 {
-            match &self.tokens[self.index].token {
-                Token::LBrace => depth += 1,
-                Token::RBrace => depth = depth.saturating_sub(1),
-                _ => {}
-            }
+        while !self.is_at_end() && !self.check_token(Token::Semicolon).is_some() {
+            self.advance();
+        }
+
+        if !self.is_at_end() {
             self.advance();
         }
     }
 
-    fn parse_qualified_name(&mut self) -> Option<Vec<String>> {
+    fn parse_qualified_name(&mut self) -> Option<Vec<Ustr>> {
         let mut parts = Vec::new();
 
-        let Token::Identifier(name) = self.peek()?.token else {
+        let Token::Identifier(name) = self.try_peak_token()?.token else {
             return None;
         };
 
         parts.push(name.clone());
         self.advance();
 
-        while self.match_token(&Token::DoubleColon) {
-            let Some(guarded) = self.peek() else {
+        while self.expect_token(Token::DoubleColon).is_some() {
+            let Some(guarded) = self.try_peak_token() else {
                 break;
             };
 
@@ -373,75 +665,63 @@ impl<'tok> SymbolParser<'tok> {
 
     fn skip_attributes(&mut self) {
         loop {
-            let start = self.index;
+            let Some(group) = self.check_group(Delimiter::Brackets) else {
+                break;
+            };
 
-            if !self.match_token(&Token::LBracket) {
-                return;
+            if group.children.len() != 1
+                && group.children[0]
+                    .try_get_group()
+                    .is_some_and(|group| group.delimiter != Delimiter::Brackets)
+            {
+                break;
             }
 
-            if !self.match_token(&Token::LBracket) {
-                self.index = start;
-                return;
-            }
-
-            let mut depth = 1usize;
-
-            while let Some(guarded) = self.peek() {
-                match guarded.token {
-                    Token::LBracket => depth += 1,
-                    Token::RBracket => {
-                        depth = depth.saturating_sub(1);
-
-                        if depth == 0 {
-                            self.advance();
-
-                            if self.check(&Token::RBracket) {
-                                self.advance();
-                            }
-
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-
-                self.advance();
-            }
-        }
-    }
-
-    fn match_token(&mut self, expected: &Token) -> bool {
-        if self.check(expected) {
             self.advance();
-            true
-        } else {
-            false
         }
     }
 
-    fn expect(&mut self, expected: Token) -> Option<GuardedToken<'tok>> {
-        if !self.check(&expected) {
-            return None;
-        }
-
-        let current = self.tokens[self.index].clone();
-        self.advance();
-        Some(current)
+    fn expect_token(&mut self, expected: Token) -> Option<GuardedToken> {
+        self.check_token(expected).map(|guarded| {
+            self.advance();
+            guarded
+        })
     }
 
-    fn check(&self, expected: &Token) -> bool {
-        self.peek()
-            .is_some_and(|guarded| *guarded.token == *expected)
+    fn expect_group(&mut self, expected: Delimiter) -> Option<TokenGroup> {
+        self.check_group(expected).map(|group| {
+            self.advance();
+            group
+        })
     }
 
-    fn check_next(&self, expected: &Token) -> bool {
+    fn check_token(&self, expected: Token) -> Option<GuardedToken> {
+        self.try_peak_token()
+            .filter(|guarded| guarded.token == expected)
+    }
+
+    fn check_next_token(&self, expected: Token) -> Option<GuardedToken> {
         self.tokens
             .get(self.index + 1)
-            .is_some_and(|guarded| *guarded.token == *expected)
+            .and_then(|token| token.try_get_token())
+            .filter(|guarded| guarded.token == expected)
     }
 
-    fn peek(&self) -> Option<GuardedToken<'tok>> {
+    fn check_group(&self, expected: Delimiter) -> Option<TokenGroup> {
+        self.try_peak_group()
+            .filter(|group| group.delimiter == expected)
+    }
+
+    fn peek(&self) -> Option<TokenNode> {
         self.tokens.get(self.index).map(|guarded| guarded.clone())
+    }
+
+    fn try_peak_token(&self) -> Option<GuardedToken> {
+        self.peek().and_then(|token| token.try_get_token())
+    }
+
+    fn try_peak_group(&self) -> Option<TokenGroup> {
+        self.peek().and_then(|token| token.try_get_group())
     }
 
     fn advance(&mut self) {
@@ -453,71 +733,73 @@ impl<'tok> SymbolParser<'tok> {
     }
 }
 
-fn extract_namespace(guards: &[PreprocessorGuard], is_inline: bool, mut names: Vec<String>, symbols: Vec<Symbol>) -> Symbol {
+fn extract_namespace(
+    guards: Rc<[PreprocessorGuard]>,
+    is_inline: bool,
+    mut names: Vec<Ustr>,
+    symbols: Vec<Symbol>,
+) -> Symbol {
     let name = names.pop().unwrap();
     if names.len() == 0 {
         return Symbol {
             name,
-            guards: guards.to_vec(),
-            kind: SymbolKind::Namespace(Namespace {
-                is_inline,
-                symbols,
-            }),
+            guards,
+            kind: SymbolKind::Namespace(Namespace { is_inline, symbols }),
         };
     }
 
     Symbol {
         name,
-        guards: guards.to_vec(),
+        guards: guards.clone(),
         kind: SymbolKind::Namespace(Namespace {
             is_inline,
-            symbols: vec![extract_namespace(guards, is_inline, names, symbols)]
+            symbols: vec![extract_namespace(guards, is_inline, names, symbols)],
         }),
     }
 }
 
-pub fn parse_symbols<'tok>(input: &'tok [GuardedToken<'tok>]) -> Result<Vec<Symbol>, SymbolError>
-{
+pub fn parse_symbols<'tok>(input: &'tok [GuardedToken]) -> Result<Vec<Symbol>, SymbolError> {
     eprintln!("parse_symbols: starting");
 
-    let result = SymbolParser::new(input).parse();
+    let nodes = collect_token_nodes(input);
+    let result = SymbolParser::new(&nodes).parse();
 
     eprintln!("parse_symbols: finished");
 
     Ok(result)
 }
 
-
 #[cfg(test)]
 mod test {
-    use std::assert_matches;
-    use logos::Logos;
     use super::*;
+    use logos::Logos;
+    use std::assert_matches;
 
     fn lex(source: &str) -> Vec<Token> {
         Token::lexer(source)
-            .filter_map(|result| {
-                result.ok()
-            })
+            .filter_map(|result| result.ok())
             .collect()
     }
 
-    fn to_guarded_tokens(tokens: &[Token]) -> Vec<GuardedToken<'_>> {
-        tokens.iter()
+    fn to_guarded_tokens(tokens: &[Token]) -> Vec<GuardedToken> {
+        tokens
+            .iter()
             .filter(|token| !token.is_trivial())
-            .map(|token| {
-                GuardedToken {
-                    token,
-                    guards: &[]
-                }
+            .map(|token| GuardedToken {
+                token: token.clone(),
+                guards: Rc::new([]),
             })
             .collect()
     }
 
     fn assert_declarations(actual: &[Symbol], expected: &[&str]) {
-        let actual_names: Vec<_> = actual.iter().map(|symbol| &symbol.name).collect();
+        let actual_names: Vec<_> = actual.iter().map(|symbol| symbol.name.as_str()).collect();
         assert_eq!(actual_names, expected);
-        assert!(actual.iter().all(|symbol| matches!(&symbol.kind, SymbolKind::ExportableSymbol)));
+        assert!(
+            actual
+                .iter()
+                .all(|symbol| matches!(&symbol.kind, SymbolKind::ExportableSymbol))
+        );
     }
 
     #[test]
@@ -581,8 +863,8 @@ mod test {
                 "MathFn",
                 "String",
                 "IntList",
-                "Predicate"
-            ]
+                "Predicate",
+            ],
         );
     }
 
@@ -613,14 +895,7 @@ mod test {
         let result = parse_symbols(&guarded);
         assert!(result.is_ok());
         let symbols = result.unwrap();
-        assert_declarations(
-            &symbols,
-            &[
-                "Color",
-                "Direction",
-                "Byte"
-            ]
-        );
+        assert_declarations(&symbols, &["Color", "Direction", "Byte"]);
     }
 
     #[test]
@@ -652,16 +927,7 @@ mod test {
         let result = parse_symbols(&guarded);
         assert!(result.is_ok());
         let symbols = result.unwrap();
-        assert_declarations(
-            &symbols,
-            &[
-                "Empty",
-                "Base",
-                "Derived",
-                "Actor",
-                "Variant"
-            ]
-        );
+        assert_declarations(&symbols, &["Empty", "Base", "Derived", "Actor", "Variant"]);
     }
 
     #[test]
@@ -684,8 +950,8 @@ mod test {
                 "GlobalInt",
                 "ExternalInt",
                 "CompileTimeValue",
-                "GlobalString"
-            ]
+                "GlobalString",
+            ],
         );
     }
 
@@ -699,13 +965,7 @@ mod test {
         let result = parse_symbols(&guarded);
         assert!(result.is_ok());
         let symbols = result.unwrap();
-        assert_declarations(
-            &symbols,
-            &[
-                "FixedArray",
-                "LookupTable"
-            ]
-        );
+        assert_declarations(&symbols, &["FixedArray", "LookupTable"]);
     }
 
     #[test]
@@ -722,15 +982,7 @@ mod test {
         let result = parse_symbols(&guarded);
         assert!(result.is_ok());
         let symbols = result.unwrap();
-        assert_declarations(
-            &symbols,
-            &[
-                "Ptr",
-                "ConstPtr",
-                "Ref",
-                "RValueRef"
-            ]
-        );
+        assert_declarations(&symbols, &["Ptr", "ConstPtr", "Ref", "RValueRef"]);
     }
 
     #[test]
@@ -756,8 +1008,8 @@ mod test {
                 "Add",
                 "GetName",
                 "NoexceptFunction",
-                "Compute"
-            ]
+                "Compute",
+            ],
         );
     }
 
@@ -775,11 +1027,7 @@ mod test {
         let symbols = result.unwrap();
         assert_declarations(
             &symbols,
-            &[
-                "GlobalCallback",
-                "GlobalMathFn",
-                "SignalHandlers"
-            ]
+            &["GlobalCallback", "GlobalMathFn", "SignalHandlers"],
         );
     }
 
@@ -791,12 +1039,7 @@ mod test {
         let result = parse_symbols(&guarded);
         assert!(result.is_ok());
         let symbols = result.unwrap();
-        assert_declarations(
-            &symbols,
-            &[
-                "GetMathFunction"
-            ]
-        );
+        assert_declarations(&symbols, &["GetMathFunction"]);
     }
 
     #[test]
@@ -807,12 +1050,7 @@ mod test {
         let result = parse_symbols(&guarded);
         assert!(result.is_ok());
         let symbols = result.unwrap();
-        assert_declarations(
-            &symbols,
-            &[
-                "CallbackRef"
-            ]
-        );
+        assert_declarations(&symbols, &["CallbackRef"]);
     }
 
     #[test]
@@ -832,14 +1070,7 @@ mod test {
         let result = parse_symbols(&guarded);
         assert!(result.is_ok());
         let symbols = result.unwrap();
-        assert_declarations(
-            &symbols,
-            &[
-                "MemberExample",
-                "ValuePtr",
-                "MethodPtr"
-            ]
-        );
+        assert_declarations(&symbols, &["MemberExample", "ValuePtr", "MethodPtr"]);
     }
 
     #[test]
@@ -867,16 +1098,7 @@ mod test {
         let result = parse_symbols(&guarded);
         assert!(result.is_ok());
         let symbols = result.unwrap();
-        assert_declarations(
-            &symbols,
-            &[
-                "Vector",
-                "Pair",
-                "Ptr",
-                "IsVoid",
-                "Max"
-            ]
-        );
+        assert_declarations(&symbols, &["Vector", "Pair", "Ptr", "IsVoid", "Max"]);
     }
 
     #[test]
@@ -891,12 +1113,7 @@ mod test {
         let result = parse_symbols(&guarded);
         assert!(result.is_ok());
         let symbols = result.unwrap();
-        assert_declarations(
-            &symbols,
-            &[
-                "Incrementable"
-            ]
-        );
+        assert_declarations(&symbols, &["Incrementable"]);
     }
 
     #[test]
@@ -912,12 +1129,7 @@ mod test {
         let result = parse_symbols(&guarded);
         assert!(result.is_ok());
         let symbols = result.unwrap();
-        assert_declarations(
-            &symbols,
-            &[
-                "FriendOwner"
-            ]
-        );
+        assert_declarations(&symbols, &["FriendOwner"]);
     }
 
     #[test]
@@ -939,12 +1151,7 @@ mod test {
         let result = parse_symbols(&guarded);
         assert!(result.is_ok());
         let symbols = result.unwrap();
-        assert_declarations(
-            &symbols,
-            &[
-                "Outer"
-            ]
-        );
+        assert_declarations(&symbols, &["Outer"]);
     }
 
     #[test]
@@ -956,13 +1163,7 @@ mod test {
         let result = parse_symbols(&guarded);
         assert!(result.is_ok());
         let symbols = result.unwrap();
-        assert_declarations(
-            &symbols,
-            &[
-                "ImportantFunction",
-                "OldFunction"
-            ]
-        );
+        assert_declarations(&symbols, &["ImportantFunction", "OldFunction"]);
     }
 
     #[test]
@@ -974,13 +1175,7 @@ mod test {
         let result = parse_symbols(&guarded);
         assert!(result.is_ok());
         let symbols = result.unwrap();
-        assert_declarations(
-            &symbols,
-            &[
-                "ModernFunction",
-                "Factory"
-            ]
-        );
+        assert_declarations(&symbols, &["ModernFunction", "Factory"]);
     }
 
     #[test]
@@ -991,12 +1186,25 @@ mod test {
         let result = parse_symbols(&guarded);
         assert!(result.is_ok());
         let symbols = result.unwrap();
-        assert_declarations(
-            &symbols,
-            &[
-                "AutoValue"
-            ]
-        );
+        assert_declarations(&symbols, &["AutoValue"]);
+    }
+
+    #[test]
+    fn can_parse_operator_overloads() {
+        let code = "auto operator+(int a, int b) -> int;
+                         auto operator new(size_t size) -> void*;
+                         auto operator new[](size_t size) -> void*;
+                         auto operator delete(void* ptr) -> void;
+                         auto operator delete[](void* ptr) -> void;
+                         auto operator co_await(Task<void>) -> Awaiter<void>;
+                         auto operator[](int index) -> int&;
+                         auto operator()(int a, int b) -> int;";
+        let tokens = lex(code);
+        let guarded = to_guarded_tokens(&tokens);
+        let result = parse_symbols(&guarded);
+        assert!(result.is_ok());
+        let symbols = result.unwrap();
+        assert_declarations(&symbols, &["operator+", "operator new", "operator new[]", "operator delete", "operator delete[]", "operator co_await", "operator[]", "operator()"]);
     }
 
     #[test]
@@ -1011,7 +1219,12 @@ mod test {
         assert!(result.is_ok());
         let symbols = result.unwrap();
         assert_eq!(symbols.len(), 1);
-        let Symbol { name, kind: SymbolKind::Namespace(namespace), .. } = &symbols[0] else {
+        let Symbol {
+            name,
+            kind: SymbolKind::Namespace(namespace),
+            ..
+        } = &symbols[0]
+        else {
             assert!(false, "Expected a namespace symbol");
             unreachable!()
         };

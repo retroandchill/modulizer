@@ -1,35 +1,56 @@
+use std::rc::Rc;
 use crate::parser::grammar::{GuardedToken, Token};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Delimiter {
     Parentheses,
     Braces,
     Brackets
 }
 
-pub struct TokenGroup<'tok> {
+#[derive(Debug, Clone, PartialEq)]
+pub struct TokenGroup {
     pub delimiter: Delimiter,
-    pub children: Vec<TokenNode<'tok>>,
+    pub children: Rc<[TokenNode]>,
     pub terminated: bool,
 }
 
-pub enum TokenNode<'tok> {
-    Token(GuardedToken<'tok>),
-    Group(TokenGroup<'tok>)
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenNode {
+    Token(GuardedToken),
+    Group(TokenGroup)
 }
 
-pub fn collect_token_nodes<'tok>(nodes: &[GuardedToken<'tok>]) -> Vec<TokenNode<'tok>> {
+impl TokenNode {
+    pub fn try_get_token(&self) -> Option<GuardedToken> {
+        if let TokenNode::Token(token) = self {
+            Some(token.clone())
+        } else {
+            None
+        }
+    }
+    
+    pub fn try_get_group(&self) -> Option<TokenGroup> {
+        if let TokenNode::Group(group) = self {
+            Some(group.clone())
+        } else {
+            None
+        }
+    }
+}
+
+pub fn collect_token_nodes(nodes: &[GuardedToken]) -> Vec<TokenNode> {
     let mut index = 0usize;
     let (_, nodes) = collect_until(nodes, &mut index, None);
     nodes
 }
 
-fn collect_until<'tok>(nodes: &[GuardedToken<'tok>], index: &mut usize, delimiter: Option<Token>) -> (bool, Vec<TokenNode<'tok>>) {
+fn collect_until(nodes: &[GuardedToken], index: &mut usize, delimiter: Option<Token>) -> (bool, Vec<TokenNode>) {
     let mut result = Vec::new();
     while let Some(guarded) = nodes.get(*index) {
         *index += 1;
 
-        if delimiter.as_ref().is_some_and(|d| *d == *guarded.token) {
+        if delimiter.as_ref().is_some_and(|d| *d == guarded.token) {
             return (true, result);
         }
 
@@ -38,7 +59,7 @@ fn collect_until<'tok>(nodes: &[GuardedToken<'tok>], index: &mut usize, delimite
                 let (terminated, children) = collect_until(nodes, index, Some(Token::RBrace));
                 result.push(TokenNode::Group(TokenGroup {
                     delimiter: Delimiter::Braces,
-                    children,
+                    children: Rc::from(children),
                     terminated,
                 }));
             }
@@ -46,7 +67,7 @@ fn collect_until<'tok>(nodes: &[GuardedToken<'tok>], index: &mut usize, delimite
                 let (terminated, children) = collect_until(nodes, index, Some(Token::RBracket));
                 result.push(TokenNode::Group(TokenGroup {
                     delimiter: Delimiter::Brackets,
-                    children,
+                    children: Rc::from(children),
                     terminated,
                 }));
             }
@@ -54,7 +75,7 @@ fn collect_until<'tok>(nodes: &[GuardedToken<'tok>], index: &mut usize, delimite
                 let (terminated, children) = collect_until(nodes, index, Some(Token::RParen));
                 result.push(TokenNode::Group( TokenGroup{
                     delimiter: Delimiter::Parentheses,
-                    children,
+                    children: Rc::from(children),
                     terminated,
                 }));
             }

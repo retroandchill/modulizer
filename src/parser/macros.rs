@@ -6,10 +6,11 @@ use chumsky::prelude::SimpleSpan;
 use chumsky::primitive::{any, choice, just};
 use chumsky::recursive::recursive;
 use chumsky::{extra, IterParser, Parser};
+use ustr::Ustr;
 
 #[derive(Debug, Clone)]
 pub struct MacroExpansionCandidate {
-    pub name: String,
+    pub name: Ustr,
     pub parameters: Option<Vec<Vec<Token>>>
 }
 

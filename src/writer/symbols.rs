@@ -116,7 +116,7 @@ impl<'a, W: Write> SymbolWriteContext<'a, W> {
                 PreprocessorGuard::Conditional(condition) => match condition {
                     ConditionalDirective::If { expression } => {
                         self.writer.write_all_unindented(b"#if ")?;
-                        for token in expression {
+                        for token in expression.iter() {
                             self.writer
                                 .write_fmt_unindented(format_args!("{}", token))?;
                         }
@@ -132,7 +132,7 @@ impl<'a, W: Write> SymbolWriteContext<'a, W> {
                     }
                     ConditionalDirective::Elif { expression } => {
                         self.writer.write_all_unindented(b"#if ")?;
-                        for token in expression {
+                        for token in expression.iter() {
                             self.writer
                                 .write_fmt_unindented(format_args!("{}", token))?;
                         }

@@ -3,6 +3,7 @@ use chumsky::error::Rich;
 use chumsky::{extra, select, Parser};
 use chumsky::input::ValueInput;
 use chumsky::prelude::{any, end, just, SimpleSpan};
+use ustr::Ustr;
 use crate::parser::grammar::Token;
 
 
@@ -88,7 +89,7 @@ where
 
 
 pub fn identifier<'tok, I>(
-) -> impl Parser<'tok, I, String, extra::Err<Rich<'tok, Token>>> + Clone
+) -> impl Parser<'tok, I, Ustr, extra::Err<Rich<'tok, Token>>> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>,
 {

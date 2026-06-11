@@ -8,6 +8,8 @@ use chumsky::IterParser;
 use chumsky::{extra, Parser};
 use std::fmt::Write;
 use std::path::PathBuf;
+use std::rc::Rc;
+use ustr::Ustr;
 
 #[derive(Debug, Clone)]
 pub struct IncludeDirective {
@@ -24,41 +26,41 @@ pub enum IncludePath {
 
 #[derive(Debug, Clone)]
 pub struct DefineDirective {
-    pub name: String,
+    pub name: Ustr,
     pub parameters: Option<MacroParameters>,
-    pub replacement: Vec<Token>,
+    pub replacement: Rc<[Token]>,
 }
 
 #[derive(Debug, Clone)]
 pub struct MacroParameters {
-    pub names: Vec<String>,
+    pub names: Rc<[Ustr]>,
     pub variadic: bool
 }
 
 #[derive(Debug, Clone)]
 pub struct UndefDirective {
-    pub name: String,
+    pub name: Ustr,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConditionalDirective {
     If {
-        expression: Vec<Token>,
+        expression: Rc<[Token]>,
     },
     Ifdef {
-        name: String,
+        name: Ustr,
     },
     Ifndef {
-        name: String,
+        name: Ustr,
     },
     Elif {
-        expression: Vec<Token>,
+        expression: Rc<[Token]>,
     },
     Elifdef {
-        name: String,
+        name: Ustr,
     },
     Elifndef {
-        name: String,
+        name: Ustr,
     },
 }
 
@@ -94,7 +96,7 @@ where
     non_breaking_whitespace()
         .ignore_then(just(Token::Hash))
         .ignore_then(non_breaking_whitespace())
-        .ignore_then(just(Token::Identifier(name.to_string())))
+        .ignore_then(just(Token::Identifier(Ustr::from(name))))
         .ignored()
 }
 
@@ -216,7 +218,7 @@ where
 }
 
 fn macro_parameter_name<'tok, I>(
-) -> impl Parser<'tok, I, Option<String>, extra::Err<Rich<'tok, Token>>>
+) -> impl Parser<'tok, I, Option<Ustr>, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>,
 {
@@ -254,7 +256,7 @@ where
             }
 
             MacroParameters {
-                names,
+                names: Rc::from(names),
                 variadic
             }
         })
@@ -282,7 +284,7 @@ where
         })
 }
 
-fn trim_replacement(tokens: &[Token]) -> Vec<Token> {
+fn trim_replacement(tokens: &[Token]) -> Rc<[Token]> {
     let mut result = Vec::new();
 
     let mut whitespace_hit = false;
@@ -293,13 +295,13 @@ fn trim_replacement(tokens: &[Token]) -> Vec<Token> {
             }
 
             whitespace_hit = true;
-            result.push(Token::Whitespace(" ".to_string()));
+            result.push(Token::Whitespace);
         } else {
             whitespace_hit = false;
             result.push(token.clone());
         }
     }
-    result
+    Rc::from(result)
 }
 
 fn undef_directive<'tok, I>(
@@ -327,7 +329,7 @@ where
         .ignore_then(rest_of_line())
         .then_ignore(optional_newline())
         .map(|expression| {
-            DirectiveStatement::Conditional(ConditionalDirective::If { expression: expression.to_vec() })
+            DirectiveStatement::Conditional(ConditionalDirective::If { expression: Rc::from(expression) })
         })
 }
 
@@ -370,7 +372,7 @@ where
         .ignore_then(rest_of_line())
         .then_ignore(optional_newline())
         .map(|expression| {
-            DirectiveStatement::Conditional(ConditionalDirective::Elif { expression: expression.to_vec() })
+            DirectiveStatement::Conditional(ConditionalDirective::Elif { expression: Rc::from(expression) })
         })
 }
 

@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::collections::hash_map::Entry;
 use std::path::PathBuf;
+use std::rc::Rc;
 use itertools::Itertools;
 use logos::Logos;
+use ustr::{Ustr, UstrMap};
 use crate::config::Config;
 use crate::parser::grammar::{GuardedTokens, PreprocessorGuard, Token};
 use crate::parser::macros::{parse_expandable_syntax, ExpandableSyntax, MacroExpansionCandidate};
@@ -11,16 +13,16 @@ use crate::parser::symbols::{parse_symbols, Namespace, Symbol, SymbolKind};
 
 pub struct TranslationUnit {
     symbols: Vec<Symbol>,
-    macros: HashSet<String>,
+    macros: HashSet<Ustr>,
 }
 
 struct TranslationUnitState<'a> {
     config: &'a Config,
     tokens: Vec<GuardedTokens>,
-    definitions: HashMap<String, DefineDirective>,
+    definitions: HashMap<Ustr, DefineDirective>,
     header_stack: VecDeque<PathBuf>,
     seen_headers: HashSet<PathBuf>,
-    all_macros: HashSet<String>,
+    all_macros: HashSet<Ustr>,
     guards: VecDeque<PreprocessorGuard>,
 }
 
@@ -60,23 +62,24 @@ impl TranslationUnit {
     }
 }
 
-fn get_initial_macro_definitions(config: &Config) -> HashMap<String, DefineDirective> {
+fn get_initial_macro_definitions(config: &Config) -> HashMap<Ustr, DefineDirective> {
     let mut definitions = HashMap::new();
     for directive in &config.macros.explicit_macros {
+        let directive = Ustr::from(directive);
         let Some((name, replacement)) = directive.split_once("=") else {
             definitions.insert(directive.clone(), DefineDirective {
-                name: directive.clone(),
+                name: directive,
                 parameters: None,
-                replacement: Vec::new(),
+                replacement: Rc::new([]),
             });
             continue;
         };
 
         let tokens = lex(replacement);
-        definitions.insert(name.to_string(), DefineDirective {
-            name: name.to_string(),
+        definitions.insert(Ustr::from(name), DefineDirective {
+            name: directive,
             parameters: None,
-            replacement: tokens,
+            replacement: Rc::from(tokens),
         });
     }
     definitions
@@ -223,13 +226,13 @@ impl<'a> TranslationUnitState<'a> {
     }
 
     fn parse_definition(&mut self, define: DefineDirective) {
-        if self.config.macros.expand_from_definition.contains(&define.name) {
+        if self.config.macros.expand_from_definition.contains(define.name.as_str()) {
             self.definitions.insert(define.name.clone(), define);
         }
     }
 
-    fn parse_undefine(&mut self, name: String) {
-        if self.config.macros.expand_from_definition.contains(&name) {
+    fn parse_undefine(&mut self, name: Ustr) {
+        if self.config.macros.expand_from_definition.contains(name.as_str()) {
             self.definitions.remove(&name);
         }
     }
@@ -277,11 +280,11 @@ impl<'a> TranslationUnitState<'a> {
 
         match &definition.parameters {
             Some(parameters) => {
-                expand_functional_macro(candidate, &definition.name, parameters, definition.replacement.as_slice(), tokens)?;
+                expand_functional_macro(candidate, &definition.name, parameters, &definition.replacement, tokens)?;
                 Ok(true)
             }
             None => {
-                tokens.extend_from_slice(definition.replacement.as_slice());
+                tokens.extend_from_slice(&definition.replacement);
                 if let Some(mut parameters) = candidate.parameters {
                     append_macro_parameters(&mut parameters, tokens);
                 }
@@ -313,10 +316,10 @@ impl<'a> TranslationUnitState<'a> {
                     continue;
                 }
 
-                if let Some(Symbol { kind: SymbolKind::Namespace(existing_namespace), guards, .. }) = seen_symbols.get(symbol.name.as_str())
+                if let Some(Symbol { kind: SymbolKind::Namespace(existing_namespace), guards, .. }) = seen_symbols.get(&symbol.name)
                     .and_then(|index| -> Option<&mut Symbol> { symbols.get_mut(*index) }) {
                     existing_namespace.symbols.append(&mut namespace.symbols);
-                    reduce_guard_set(guards, symbol.guards);
+                    *guards = reduce_guard_set(guards.clone(), symbol.guards);
                 } else {
                     seen_symbols.insert(symbol.name.clone(), symbols.len());
                     symbols.push(Symbol {
@@ -338,10 +341,10 @@ impl<'a> TranslationUnitState<'a> {
             let current_scope = if parent_scope.is_empty() {
                 symbol.name.clone()
             } else {
-                format!("{}::{}", parent_scope, symbol.name)
+                Ustr::from(format!("{}::{}", parent_scope, symbol.name).as_str())
             };
-            let is_excluded = parent_is_excluded || self.config.symbols.exclude.contains(&current_scope);
-            if is_excluded && (self.config.symbols.include.contains(&current_scope) || !self.config.symbols.include.iter().any(|include| include.starts_with(format!("{}::", current_scope).as_str()))) {
+            let is_excluded = parent_is_excluded || self.config.symbols.exclude.contains(current_scope.as_str());
+            if is_excluded && (self.config.symbols.include.contains(current_scope.as_str()) || !self.config.symbols.include.iter().any(|include| include.starts_with(format!("{}::", current_scope).as_str()))) {
                 continue;
             }
 
@@ -354,7 +357,7 @@ impl<'a> TranslationUnitState<'a> {
                     }) {
                         if !sub_namespace.is_inline {
                             merged_symbols = sub_namespace.symbols;
-                            name = format!("{}::{}", name, sub_name);
+                            name = Ustr::from(format!("{}::{}", name, sub_name).as_str());
                         }
                         else {
                             merged_symbols.push(Symbol {
@@ -382,9 +385,9 @@ impl<'a> TranslationUnitState<'a> {
     }
 }
 
-fn reduce_guard_set(existing: &mut Vec<PreprocessorGuard>, new: Vec<PreprocessorGuard>) {
+fn reduce_guard_set(existing: Rc<[PreprocessorGuard]>, new: Rc<[PreprocessorGuard]>) -> Rc<[PreprocessorGuard]> {
     if existing.is_empty() {
-        return;
+        return existing;
     }
 
     let reduced_index = existing.iter().zip(new.iter())
@@ -396,9 +399,9 @@ fn reduce_guard_set(existing: &mut Vec<PreprocessorGuard>, new: Vec<Preprocessor
         .next();
 
     if let Some(index) = reduced_index {
-        existing.drain(index..);
+        Rc::from(&existing[0..index])
     } else {
-        existing.clear();
+        Rc::new([])
     }
 }
 
@@ -439,7 +442,7 @@ fn expand_functional_macro(candidate: MacroExpansionCandidate, name: &str, param
                     for parameter_set in variadic_pack {
                         if index > 0 {
                             tokens.push(Token::Comma);
-                            tokens.push(Token::Whitespace(" ".to_string()));
+                            tokens.push(Token::Whitespace);
                         }
 
                         tokens.append(&mut parameter_set.clone());
@@ -469,7 +472,7 @@ fn append_macro_parameters(parameters: &mut Vec<Vec<Token>>, tokens: &mut Vec<To
     for mut parameter in parameters {
         if index > 0 {
             tokens.push(Token::Comma);
-            tokens.push(Token::Whitespace(" ".to_string()));
+            tokens.push(Token::Whitespace);
         }
 
         tokens.append(&mut parameter);
