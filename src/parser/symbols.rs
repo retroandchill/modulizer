@@ -28,12 +28,6 @@ impl fmt::Display for SymbolError {
 impl std::error::Error for SymbolError {}
 
 #[derive(Debug, Clone)]
-pub struct CppNameSegment {
-    pub name: String,
-    pub has_template_args: bool,
-}
-
-#[derive(Debug, Clone)]
 pub struct Namespace {
     pub is_inline: bool,
     pub symbols: Vec<Symbol>,
@@ -63,11 +57,6 @@ pub enum SymbolKind {
     NamespaceAlias(String),
 }
 
-pub enum DeclarationTerminator {
-    Semicolon,
-    ClosingBrace,
-}
-
 #[derive(Debug, Clone)]
 pub struct Symbol {
     pub name: Ustr,
@@ -78,11 +67,12 @@ pub struct Symbol {
 struct SymbolParser<'a> {
     tokens: &'a [TokenNode],
     index: usize,
+    symbols: Vec<Symbol>,
 }
 
 impl<'a> SymbolParser<'a> {
     fn new(tokens: &'a [TokenNode]) -> Self {
-        Self { tokens, index: 0 }
+        Self { tokens, index: 0, symbols: Vec::new() }
     }
 
     fn parse(mut self) -> Vec<Symbol> {
@@ -151,11 +141,13 @@ impl<'a> SymbolParser<'a> {
     }
 
     fn parse_class(&mut self) -> Option<Symbol> {
+        self.skip_declaration_qualifiers();
         let declaration = self.expect_token(Token::Class)?;
         self.parse_class_or_struct(declaration)
     }
 
     fn parse_struct(&mut self) -> Option<Symbol> {
+        self.skip_declaration_qualifiers();
         let declaration = self.expect_token(Token::Struct)?;
         self.parse_class_or_struct(declaration)
     }
@@ -195,6 +187,7 @@ impl<'a> SymbolParser<'a> {
     }
 
     fn parse_union(&mut self) -> Option<Symbol> {
+        self.skip_declaration_qualifiers();
         let declaration = self.expect_token(Token::Union)?;
         let name = match self.try_peak_token()?.token {
             Token::Identifier(name) => {
@@ -215,6 +208,7 @@ impl<'a> SymbolParser<'a> {
     }
 
     fn parse_enum(&mut self) -> Option<Symbol> {
+        self.skip_declaration_qualifiers();
         let declaration = self.expect_token(Token::Enum)?;
 
         if self.check_token(Token::Class).is_some() || self.check_token(Token::Struct).is_some() {
@@ -223,6 +217,7 @@ impl<'a> SymbolParser<'a> {
         self.parse_class_or_struct(declaration)
     }
     fn parse_using(&mut self) -> Option<Symbol> {
+        self.skip_declaration_qualifiers();
         self.expect_token(Token::Using)?;
 
         let next = self.try_peak_token()?;
@@ -260,6 +255,7 @@ impl<'a> SymbolParser<'a> {
     }
 
     fn parse_typedef(&mut self) -> Option<Symbol> {
+        self.skip_declaration_qualifiers();
         let declaration = self.expect_token(Token::Typedef)?;
 
         let mut name = None;
@@ -332,43 +328,101 @@ impl<'a> SymbolParser<'a> {
     }
 
     fn parse_variable_or_function(&mut self) -> Option<Symbol> {
-        self.skip_qualifiers();
-        let is_auto = self.parse_type_qualifier()?;
+        self.skip_declaration_qualifiers();
+        let is_auto = self.parse_type_specifier()?;
 
+        let node = self.peek()?;
+        let (name, guards, is_function)  = match node {
+            TokenNode::Token(_) => {
+                self.parse_variable_or_function_name()?
+            }
+            TokenNode::Group(group) => {
+                match group.delimiter {
+                    Delimiter::Parentheses => {
+                        self.advance();
+                        let mut sub_parser = SymbolParser::new(&group.children);
+                        let identifier = sub_parser.try_peak_token()?;
+                        match identifier.token {
+                            Token::Star | Token::Amp | Token::And => {
+                                sub_parser.advance();
+                                sub_parser.skip_optional_cv_qualifiers();
+                            }
+                            _ => return None,
+                        }
+
+                        let dec_info = sub_parser.parse_variable_or_function_name()?;
+
+                        self.expect_group(Delimiter::Parentheses)?;
+
+                        if self.expect_token(Token::Noexcept).is_some() {
+                            self.expect_group(Delimiter::Parentheses);
+
+                        }
+
+                        if is_auto {
+                            if self.expect_token(Token::Arrow).is_some() {
+                                self.parse_type_specifier()?;
+                            }
+                        }
+
+                        dec_info
+                    }
+                    _ => return None
+                }
+            }
+        };
+
+        if is_function {
+            self.parse_function_body(is_auto)?;
+        }
+        else if self.check_token(Token::Semicolon).is_some() {
+            self.advance();
+        } else if self.check_token(Token::Equal).is_some() {
+            self.skip_until_semicolon();
+        }
+        else {
+            return None;
+        }
+
+        Some(Symbol {
+            name,
+            guards,
+            kind: SymbolKind::ExportableSymbol,
+        })
+    }
+
+    fn parse_variable_or_function_name(&mut self) -> Option<(Ustr, Rc<[PreprocessorGuard]>, bool)> {
         let identifier = self.try_peak_token()?;
         match identifier.token {
             Token::Identifier(name) => {
                 self.advance();
-                if self.check_token(Token::Semicolon).is_some() {
+                if self.check_group(Delimiter::Brackets).is_some() {
                     self.advance();
-                } else if self.check_token(Token::Equal).is_some() {
-                    self.skip_until_semicolon();
+                    Some((name, identifier.guards, false))
                 } else if self.check_group(Delimiter::Parentheses).is_some() {
                     self.advance();
-                    self.parse_function_body(is_auto)?;
-                }
 
-                Some(Symbol {
-                    name,
-                    guards: identifier.guards,
-                    kind: SymbolKind::ExportableSymbol,
-                })
+                    if self.expect_token(Token::Noexcept).is_some() {
+                        self.expect_group(Delimiter::Parentheses);
+
+                    }
+
+                    Some((name, identifier.guards, true))
+                }
+                else {
+                    Some((name, identifier.guards, false))
+                }
             }
             Token::Operator => {
                 let name = self.parse_operator_overload_name()?;
                 self.expect_group(Delimiter::Parentheses)?;
-                self.parse_function_body(is_auto)?;
-                Some(Symbol {
-                    name,
-                    guards: identifier.guards,
-                    kind: SymbolKind::ExportableSymbol,
-                })
+                Some((name, identifier.guards, true))
             }
             _ => None,
         }
     }
 
-    fn parse_type_qualifier(&mut self) -> Option<bool> {
+    fn parse_type_specifier(&mut self) -> Option<bool> {
         self.skip_optional_cv_qualifiers();
         if let Some(is_auto) = self.parse_fundamental_type() {
             self.skip_cv_ref_qualifiers();
@@ -482,7 +536,7 @@ impl<'a> SymbolParser<'a> {
         }
     }
 
-    fn skip_qualifiers(&mut self) {
+    fn skip_declaration_qualifiers(&mut self) {
         loop {
             match self.try_peak_token().map(|token| token.token) {
                 Some(
@@ -501,10 +555,6 @@ impl<'a> SymbolParser<'a> {
                     {
                         self.advance();
                     }
-                }
-                Some(Token::Explicit) => {
-                    self.advance();
-                    self.expect_group(Delimiter::Parentheses);
                 }
                 _ => break,
             }
@@ -588,21 +638,9 @@ impl<'a> SymbolParser<'a> {
     fn parse_function_body(&mut self, is_auto: bool) -> Option<()> {
         if is_auto {
             if self.expect_token(Token::Arrow).is_some() {
-                self.parse_type_qualifier()?;
+                self.parse_type_specifier()?;
             }
         }
-
-        self.skip_optional_cv_qualifiers();
-        if let Some(Token::Amp | Token::And) =
-            self.try_peak_token().map(|token| token.token)
-        {
-            self.advance();
-        }
-
-        if self.expect_token(Token::Noexcept).is_some() {
-            self.expect_group(Delimiter::Parentheses);
-        }
-
         if self.check_token(Token::Semicolon).is_some()
             || self.check_group(Delimiter::Braces).is_some()
         {
