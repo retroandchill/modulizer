@@ -64,15 +64,15 @@ pub struct Symbol {
     pub kind: SymbolKind,
 }
 
+#[derive(Debug, Clone)]
 struct SymbolParser<'a> {
     tokens: &'a [TokenNode],
     index: usize,
-    symbols: Vec<Symbol>,
 }
 
 impl<'a> SymbolParser<'a> {
     fn new(tokens: &'a [TokenNode]) -> Self {
-        Self { tokens, index: 0, symbols: Vec::new() }
+        Self { tokens, index: 0 }
     }
 
     fn parse(mut self) -> Vec<Symbol> {
@@ -258,20 +258,11 @@ impl<'a> SymbolParser<'a> {
         self.skip_declaration_qualifiers();
         let declaration = self.expect_token(Token::Typedef)?;
 
-        let mut name = None;
-        while !self.is_at_end() && !self.check_token(Token::Semicolon).is_some() {
-            match self.tokens[self.index]
-                .try_get_token()
-                .map(|token| token.token)
-            {
-                Some(Token::Identifier(n)) => name = Some(n),
-                _ => {}
-            }
-            self.advance();
-        }
+        let is_auto = self.parse_type_specifier()?;
+        let (name, _, _) = self.parse_variable_or_function_name(is_auto)?;
 
-        name.map(|name| Symbol {
-            name: name.clone(),
+        Some(Symbol {
+            name,
             guards: declaration.guards,
             kind: SymbolKind::ExportableSymbol,
         })
@@ -330,47 +321,7 @@ impl<'a> SymbolParser<'a> {
     fn parse_variable_or_function(&mut self) -> Option<Symbol> {
         self.skip_declaration_qualifiers();
         let is_auto = self.parse_type_specifier()?;
-
-        let node = self.peek()?;
-        let (name, guards, is_function)  = match node {
-            TokenNode::Token(_) => {
-                self.parse_variable_or_function_name()?
-            }
-            TokenNode::Group(group) => {
-                match group.delimiter {
-                    Delimiter::Parentheses => {
-                        self.advance();
-                        let mut sub_parser = SymbolParser::new(&group.children);
-                        let identifier = sub_parser.try_peak_token()?;
-                        match identifier.token {
-                            Token::Star | Token::Amp | Token::And => {
-                                sub_parser.advance();
-                                sub_parser.skip_optional_cv_qualifiers();
-                            }
-                            _ => return None,
-                        }
-
-                        let dec_info = sub_parser.parse_variable_or_function_name()?;
-
-                        self.expect_group(Delimiter::Parentheses)?;
-
-                        if self.expect_token(Token::Noexcept).is_some() {
-                            self.expect_group(Delimiter::Parentheses);
-
-                        }
-
-                        if is_auto {
-                            if self.expect_token(Token::Arrow).is_some() {
-                                self.parse_type_specifier()?;
-                            }
-                        }
-
-                        dec_info
-                    }
-                    _ => return None
-                }
-            }
-        };
+        let (name, guards, is_function)  = self.parse_variable_or_function_name(is_auto)?;
 
         if is_function {
             self.parse_function_body(is_auto)?;
@@ -391,46 +342,106 @@ impl<'a> SymbolParser<'a> {
         })
     }
 
-    fn parse_variable_or_function_name(&mut self) -> Option<(Ustr, Rc<[PreprocessorGuard]>, bool)> {
-        let identifier = self.try_peak_token()?;
-        match identifier.token {
-            Token::Identifier(name) => {
-                self.advance();
-                if self.check_group(Delimiter::Brackets).is_some() {
-                    self.advance();
-                    Some((name, identifier.guards, false))
-                } else if self.check_group(Delimiter::Parentheses).is_some() {
-                    self.advance();
+    fn parse_variable_or_function_name(&mut self, is_auto: bool) -> Option<(Ustr, Rc<[PreprocessorGuard]>, bool)> {
+        let node = self.peek()?;
+        match node {
+            TokenNode::Token(identifier) => {
+                match identifier.token {
+                    Token::Identifier(name) => {
+                        self.advance();
+                        if self.check_group(Delimiter::Brackets).is_some() {
+                            self.advance();
+                            Some((name, identifier.guards, false))
+                        } else if self.check_group(Delimiter::Parentheses).is_some() {
+                            self.advance();
 
-                    if self.expect_token(Token::Noexcept).is_some() {
-                        self.expect_group(Delimiter::Parentheses);
+                            if self.expect_token(Token::Noexcept).is_some() {
+                                self.expect_group(Delimiter::Parentheses);
 
+                            }
+
+                            Some((name, identifier.guards, true))
+                        }
+                        else {
+                            Some((name, identifier.guards, false))
+                        }
                     }
+                    Token::Operator => {
+                        let name = self.parse_operator_overload_name()?;
+                        self.expect_group(Delimiter::Parentheses)?;
+                        Some((name, identifier.guards, true))
+                    }
+                    _ => None,
+                }
+            }
+            TokenNode::Group(group) => {
+                match group.delimiter {
+                    Delimiter::Parentheses => {
+                        self.advance();
+                        let mut sub_parser = SymbolParser::new(&group.children);
+                        let identifier = sub_parser.try_peak_token()?;
+                        match identifier.token {
+                            Token::Star | Token::Amp | Token::And => {
+                                sub_parser.advance();
+                                sub_parser.skip_optional_cv_qualifiers();
+                            }
+                            Token::Identifier(_) => {
+                                sub_parser.parse_raw_complex_type()?;
+                                sub_parser.expect_token(Token::DoubleColon)?;
+                                sub_parser.expect_token(Token::Star)?;
+                            }
+                            _ => return None,
+                        }
 
-                    Some((name, identifier.guards, true))
-                }
-                else {
-                    Some((name, identifier.guards, false))
+                        let dec_info = sub_parser.parse_variable_or_function_name(is_auto)?;
+
+                        self.expect_group(Delimiter::Parentheses)?;
+
+                        if self.expect_token(Token::Noexcept).is_some() {
+                            self.expect_group(Delimiter::Parentheses);
+
+                        }
+
+                        if is_auto {
+                            if self.expect_token(Token::Arrow).is_some() {
+                                self.parse_type_specifier()?;
+                            }
+                        }
+
+                        Some(dec_info)
+                    }
+                    _ => return None
                 }
             }
-            Token::Operator => {
-                let name = self.parse_operator_overload_name()?;
-                self.expect_group(Delimiter::Parentheses)?;
-                Some((name, identifier.guards, true))
-            }
-            _ => None,
         }
     }
 
     fn parse_type_specifier(&mut self) -> Option<bool> {
         self.skip_optional_cv_qualifiers();
-        if let Some(is_auto) = self.parse_fundamental_type() {
-            self.skip_cv_ref_qualifiers();
-            return Some(is_auto);
+        let is_auto;
+        if let Some(auto) = self.parse_fundamental_type() {
+            is_auto = auto;
+        }
+        else {
+            self.expect_token(Token::Typename);
+            self.parse_raw_complex_type()?;
+            is_auto = false;
+        }
+        self.skip_cv_ref_qualifiers();
+
+        let mut pointer_to_member_check = self.clone();
+        if let Some(_) = pointer_to_member_check.parse_raw_complex_type() {
+            if pointer_to_member_check.expect_token(Token::DoubleColon).is_some() && pointer_to_member_check.check_token(Token::Star).is_some() {
+                pointer_to_member_check.advance();
+                *self = pointer_to_member_check;
+            }
         }
 
+        Some(is_auto)
+    }
+
+    fn parse_raw_complex_type(&mut self) -> Option<()> {
         // A type can optionally start with one of these
-        self.expect_token(Token::Typename);
         self.expect_token(Token::DoubleColon);
         let mut template_allowed = false;
         loop {
@@ -452,19 +463,13 @@ impl<'a> SymbolParser<'a> {
                 _ => return None,
             }
 
-            if self.check_token(Token::DoubleColon).is_none() {
+            if !self.check_token(Token::DoubleColon).is_some() || !self.check_next_token(Token::Star).is_none() {
                 break;
             }
             self.advance();
-
-            if self.check_token(Token::Star).is_some() {
-                break;
-            }
         }
 
-        self.skip_cv_ref_qualifiers();
-
-        Some(false)
+        Some(())
     }
 
     fn skip_optional_cv_qualifiers(&mut self) {
