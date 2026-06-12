@@ -292,6 +292,7 @@ impl<'a> SymbolParser<'a> {
     fn parse_template(&mut self) -> Option<Symbol> {
         self.expect_token(Token::Template)?;
         self.parse_template_parameters()?;
+        self.skip_requires_clause()?;
         match self.try_peak_token()?.token {
             Token::Class => self.parse_class(),
             Token::Struct => self.parse_struct(),
@@ -313,6 +314,45 @@ impl<'a> SymbolParser<'a> {
                 _ => {}
             }
             self.advance();
+        }
+
+        Some(())
+    }
+
+    fn skip_requires_clause(&mut self) -> Option<()> {
+        if self.expect_token(Token::Requires).is_none() {
+            return Some(());
+        }
+
+        loop {
+            match self.peek()? {
+                TokenNode::Token(token) => {
+                    match token.token {
+                        Token::Identifier(_) | Token::DoubleColon | Token::Decltype => {
+                            self.parse_templatable_identifier()?;
+                        }
+                        Token::Requires => {
+                            self.advance();
+                            self.expect_group(Delimiter::Parentheses);
+                            self.expect_group(Delimiter::Braces)?;
+                        }
+                        _ => return None,
+                    }
+                }
+                TokenNode::Group(group) => {
+                    if group.delimiter == Delimiter::Parentheses {
+                        self.advance();
+                    }
+                    else {
+                        return None;
+                    }
+                }
+            }
+
+            match self.try_peak_token().map(|token| token.token) {
+                Some(Token::And | Token::Or) => self.advance(),
+                _ => break
+            }
         }
 
         Some(())
@@ -386,7 +426,7 @@ impl<'a> SymbolParser<'a> {
                                 sub_parser.skip_optional_cv_qualifiers();
                             }
                             Token::Identifier(_) => {
-                                sub_parser.parse_raw_complex_type()?;
+                                sub_parser.parse_templatable_identifier()?;
                                 sub_parser.expect_token(Token::DoubleColon)?;
                                 sub_parser.expect_token(Token::Star)?;
                             }
@@ -424,13 +464,13 @@ impl<'a> SymbolParser<'a> {
         }
         else {
             self.expect_token(Token::Typename);
-            self.parse_raw_complex_type()?;
+            self.parse_templatable_identifier()?;
             is_auto = false;
         }
         self.skip_cv_ref_qualifiers();
 
         let mut pointer_to_member_check = self.clone();
-        if let Some(_) = pointer_to_member_check.parse_raw_complex_type() {
+        if let Some(_) = pointer_to_member_check.parse_templatable_identifier() {
             if pointer_to_member_check.expect_token(Token::DoubleColon).is_some() && pointer_to_member_check.check_token(Token::Star).is_some() {
                 pointer_to_member_check.advance();
                 *self = pointer_to_member_check;
@@ -440,7 +480,7 @@ impl<'a> SymbolParser<'a> {
         Some(is_auto)
     }
 
-    fn parse_raw_complex_type(&mut self) -> Option<()> {
+    fn parse_templatable_identifier(&mut self) -> Option<()> {
         // A type can optionally start with one of these
         self.expect_token(Token::DoubleColon);
         let mut template_allowed = false;
@@ -646,6 +686,9 @@ impl<'a> SymbolParser<'a> {
                 self.parse_type_specifier()?;
             }
         }
+
+        self.skip_requires_clause()?;
+
         if self.check_token(Token::Semicolon).is_some()
             || self.check_group(Delimiter::Braces).is_some()
         {
@@ -1252,5 +1295,25 @@ mod test {
         assert_eq!(&namespace.symbols[0].name, "VersionedType");
         assert!(namespace.is_inline);
         assert_matches!(&namespace.symbols[0].kind, SymbolKind::ExportableSymbol);
+    }
+
+    #[test]
+    fn can_parse_requires_clauses() {
+        let code = "template<typename T>
+                          requires requires(T t) { t.foo(); }
+                          void foo(T t) { t.foo(); }
+
+                          template<typename T>
+                          void bar() noexcept requires std::is_same_v<T, int>;
+
+                          template<typename... T>
+                            requires requires(T t) { t.foo(); } && std::conjunction_v<std::is_same<T, int>...>
+                          void baz() noexcept requires (std::is_convertible_to<T, int> && ...);";
+        let tokens = lex(code);
+        let guarded = to_guarded_tokens(&tokens);
+        let result = parse_symbols(&guarded);
+        assert!(result.is_ok());
+        let symbols = result.unwrap();
+        assert_declarations(&symbols, &["foo", "bar", "baz"]);
     }
 }
