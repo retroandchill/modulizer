@@ -153,23 +153,10 @@ impl<'a> SymbolParser<'a> {
     }
 
     fn parse_class_or_struct(&mut self, declaration: GuardedToken) -> Option<Symbol> {
-        let name = match self.try_peak_token()?.token {
-            Token::Identifier(name) => {
-                self.advance();
-                Some(name)
-            }
-            _ => None,
-        };
-
-        // Skip over the base class list if present
-        if self.check_token(Token::DoubleColon).is_some() || self.check_token(Token::Less).is_some()
-        {
-            // This is probably a partial specialization, which can't be exported
-            return None;
+        let name = self.parse_class_or_struct_declaration()?;
+        if self.expect_token(Token::Semicolon).is_none() {
+            return self.parse_inline_aggregate_symbol();
         }
-        self.skip_optional_base_class_list();
-        self.skip_optional_scope();
-        self.expect_token(Token::Semicolon)?;
 
         name.map(|name| Symbol {
             name: name.clone(),
@@ -178,17 +165,79 @@ impl<'a> SymbolParser<'a> {
         })
     }
 
-    fn skip_optional_base_class_list(&mut self) {
-        while !self.check_token(Token::Semicolon).is_some()
-            && !self.check_group(Delimiter::Braces).is_some()
-        {
-            self.advance();
+    fn parse_class_or_struct_declaration(&mut self) -> Option<Option<Ustr>> {
+        let name = match self.try_peak_token()?.token {
+            Token::Identifier(name) => {
+                self.advance();
+                if self.check_token(Token::DoubleColon).is_some() || self.check_token(Token::Less).is_some()
+                {
+                    // This is probably a partial specialization, which can't be exported
+                    return None;
+                }
+
+                // Skip over the base class list if present
+                self.skip_optional_base_class_list()?;
+                Some(name)
+            }
+            _ => None,
+        };
+
+
+        self.skip_optional_scope();
+        Some(name)
+    }
+
+    fn skip_optional_base_class_list(&mut self) -> Option<()> {
+        self.expect_token(Token::Final);
+        if self.expect_token(Token::Colon).is_none() {
+            return Some(());
+        };
+
+        loop {
+            let mut seen_virtual = false;
+            let mut seen_access_specifier = false;
+            loop {
+                match self.try_peak_token().map(|token| token.token) {
+                    Some(Token::Virtual) if !seen_virtual => {
+                        self.advance();
+                        seen_virtual = true;
+                    }
+                    Some(Token::Public | Token::Private | Token::Protected) if !seen_access_specifier => {
+                        self.advance();
+                        seen_access_specifier = true;
+                    }
+                    _ => break,
+                }
+            }
+
+            self.parse_templatable_identifier()?;
+
+            if self.check_token(Token::Comma).is_some() {
+                self.advance();
+            } else {
+                break;
+            }
         }
+
+        Some(())
     }
 
     fn parse_union(&mut self) -> Option<Symbol> {
         self.skip_declaration_qualifiers();
         let declaration = self.expect_token(Token::Union)?;
+        let name = self.parse_union_declaration()?;
+        if self.expect_token(Token::Semicolon).is_none() {
+            return self.parse_inline_aggregate_symbol();
+        }
+
+        name.map(|name| Symbol {
+            name: name.clone(),
+            guards: declaration.guards,
+            kind: SymbolKind::ExportableSymbol,
+        })
+    }
+
+    fn parse_union_declaration(&mut self) -> Option<Option<Ustr>> {
         let name = match self.try_peak_token()?.token {
             Token::Identifier(name) => {
                 self.advance();
@@ -198,13 +247,7 @@ impl<'a> SymbolParser<'a> {
         };
 
         self.skip_optional_scope();
-        self.expect_token(Token::Semicolon)?;
-
-        name.map(|name| Symbol {
-            name: name.clone(),
-            guards: declaration.guards,
-            kind: SymbolKind::ExportableSymbol,
-        })
+        Some(name)
     }
 
     fn parse_enum(&mut self) -> Option<Symbol> {
@@ -214,8 +257,63 @@ impl<'a> SymbolParser<'a> {
         if self.check_token(Token::Class).is_some() || self.check_token(Token::Struct).is_some() {
             self.advance();
         }
-        self.parse_class_or_struct(declaration)
+        let name = self.parse_enum_declaration()?;
+
+        if self.expect_token(Token::Semicolon).is_none() {
+            return self.parse_inline_aggregate_symbol();
+        }
+
+        name.map(|name| Symbol {
+            name,
+            guards: declaration.guards,
+            kind: SymbolKind::ExportableSymbol,
+        })
     }
+
+    fn parse_enum_declaration(&mut self) -> Option<Option<Ustr>> {
+        let name = match self.try_peak_token()?.token {
+            Token::Identifier(name) => {
+                self.advance();
+                if self.expect_token(Token::Colon).is_some() {
+                    self.parse_enum_base_type()?;
+                };
+                Some(name)
+            }
+            _ => None,
+        };
+
+        self.skip_optional_scope();
+        Some(name)
+    }
+
+    fn parse_enum_base_type(&mut self) -> Option<()> {
+        match self.try_peak_token()?.token {
+            Token::Identifier(_) | Token::DoubleColon | Token::Decltype => {
+                self.parse_templatable_identifier()?;
+            }
+            Token::Unsigned | Token::Signed => {
+                self.advance();
+                self.parse_sign_modified_type();
+            }
+            Token::Short | Token::Long | Token::LongLong => {
+                self.advance();
+                self.expect_token(Token::Int);
+            }
+            Token::Int | Token::Char | Token::WChar | Token::Char8 | Token::Char16 | Token::Char32 => {
+                self.advance();
+            }
+            _ => return None
+        }
+
+
+        Some(())
+    }
+
+    fn parse_inline_aggregate_symbol(&mut self) -> Option<Symbol> {
+        self.skip_cv_ref_qualifiers();
+        self.parse_variable_or_function_after_type(false)
+    }
+
     fn parse_using(&mut self) -> Option<Symbol> {
         self.skip_declaration_qualifiers();
         self.expect_token(Token::Using)?;
@@ -361,6 +459,10 @@ impl<'a> SymbolParser<'a> {
     fn parse_variable_or_function(&mut self) -> Option<Symbol> {
         self.skip_declaration_qualifiers();
         let is_auto = self.parse_type_specifier()?;
+        self.parse_variable_or_function_after_type(is_auto)
+    }
+
+    fn parse_variable_or_function_after_type(&mut self, is_auto: bool) -> Option<Symbol> {
         let (name, guards, is_function)  = self.parse_variable_or_function_name(is_auto)?;
 
         if is_function {
@@ -463,8 +565,30 @@ impl<'a> SymbolParser<'a> {
             is_auto = auto;
         }
         else {
-            self.expect_token(Token::Typename);
-            self.parse_templatable_identifier()?;
+            match self.try_peak_token().map(|token| token.token) {
+                Some(Token::Typename) => {
+                    self.advance();
+                    self.parse_templatable_identifier()?;
+                }
+                Some(Token::Class | Token::Struct) => {
+                    self.advance();
+                    self.parse_class_or_struct_declaration()?;
+                }
+                Some(Token::Union) => {
+                    self.advance();
+                    self.parse_union_declaration()?;
+                }
+                Some(Token::Enum) => {
+                    self.advance();
+                    if self.check_token(Token::Class).is_some() || self.check_token(Token::Struct).is_some() {
+                        self.advance();
+                    }
+                    self.parse_enum_declaration()?;
+                }
+                _ => {
+                    self.parse_templatable_identifier()?;
+                }
+            }
             is_auto = false;
         }
         self.skip_cv_ref_qualifiers();
@@ -1315,5 +1439,18 @@ mod test {
         assert!(result.is_ok());
         let symbols = result.unwrap();
         assert_declarations(&symbols, &["foo", "bar", "baz"]);
+    }
+
+    #[test]
+    fn can_parse_inline_type_declarations() {
+        let code = "typedef struct Foo_ { int x; } Foo;
+                          class Bar* get_bar();
+                          enum class Bax : std::int32_t values[3];";
+        let tokens = lex(code);
+        let guarded = to_guarded_tokens(&tokens);
+        let result = parse_symbols(&guarded);
+        assert!(result.is_ok());
+        let symbols = result.unwrap();
+        assert_declarations(&symbols, &["Foo", "get_bar", "values"]);
     }
 }
