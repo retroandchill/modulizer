@@ -1,8 +1,4 @@
-use crate::config::Config;
-
-pub mod config;
-pub mod writer;
-pub mod parser;
+use modulizer::config::Config;
 
 fn main() -> anyhow::Result<()> {
     let config = Config::load_from_args()?;

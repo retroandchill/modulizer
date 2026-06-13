@@ -64,7 +64,7 @@ impl TranslationUnit {
 
 fn get_initial_macro_definitions(config: &Config) -> HashMap<Ustr, DefineDirective> {
     let mut definitions = HashMap::new();
-    for directive in &config.macros.explicit_macros {
+    for directive in &config.explicit_macros {
         let Some((name, replacement)) = directive.split_once("=") else {
             let tokens = lex(directive.as_str());
             let result = get_macro_definition_and_parameters(&tokens);
@@ -126,7 +126,7 @@ impl<'a> TranslationUnitState<'a> {
                     if self.guards.iter().any(|guard| {
                         match guard {
                             PreprocessorGuard::Conditional(ConditionalDirective::Ifdef { name }) => {
-                                self.config.macros.implementation_macros.contains(&name)
+                                self.config.implementation_macros.contains(&name)
                             }
                             _ => false
                         }
@@ -138,7 +138,7 @@ impl<'a> TranslationUnitState<'a> {
                         .filter(|guard| {
                             match guard {
                                 PreprocessorGuard::Conditional(ConditionalDirective::Ifndef { name }) => {
-                                    self.config.headers.header_guard_format.as_ref().map(|r| {
+                                    self.config.header_guard_format.as_ref().map(|r| {
                                         !r.is_match(name)
                                     })
                                         .unwrap_or(true)
@@ -222,7 +222,7 @@ impl<'a> TranslationUnitState<'a> {
         }
 
         if target.is_none() {
-            for include_path in &self.config.headers.include_dirs {
+            for include_path in &self.config.include_dirs {
                 target = Some(include_path.join(&path)).filter(|p| p.exists());
                 if target.is_some() {
                     break;
@@ -248,13 +248,13 @@ impl<'a> TranslationUnitState<'a> {
     }
 
     fn parse_definition(&mut self, define: DefineDirective) {
-        if self.config.macros.expand_from_definition.contains(&define.name) {
+        if self.config.expand_from_definition.contains(&define.name) {
             self.definitions.insert(define.name.clone(), define);
         }
     }
 
     fn parse_undefine(&mut self, name: Ustr) {
-        if self.config.macros.expand_from_definition.contains(&name) {
+        if self.config.expand_from_definition.contains(&name) {
             self.definitions.remove(&name);
         }
     }
@@ -365,8 +365,8 @@ impl<'a> TranslationUnitState<'a> {
             } else {
                 Ustr::from(format!("{}::{}", parent_scope, symbol.name).as_str())
             };
-            let is_excluded = parent_is_excluded || self.config.symbols.exclude.contains(current_scope.as_str());
-            if is_excluded && (self.config.symbols.include.contains(current_scope.as_str()) || !self.config.symbols.include.iter().any(|include| include.starts_with(format!("{}::", current_scope).as_str()))) {
+            let is_excluded = parent_is_excluded || self.config.exclude.contains(current_scope.as_str());
+            if is_excluded && (self.config.include.contains(current_scope.as_str()) || !self.config.include.iter().any(|include| include.starts_with(format!("{}::", current_scope).as_str()))) {
                 continue;
             }
 

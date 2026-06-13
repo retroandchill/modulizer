@@ -10,16 +10,25 @@ use ustr::Ustr;
 
 #[derive(Debug)]
 pub struct Config {
-    pub module: ModuleConfig,
-    pub headers: HeaderConfig,
-    pub macros: MacroConfig,
-    pub symbols: SymbolConfig,
+    pub name: String,
+    pub output_path: PathBuf,
+
+
+    pub library_headers: Vec<ConfigIncludePath>,
+    pub include_dirs: Vec<PathBuf>,
+    pub header_guard_format: Option<Regex>,
+
+
+    pub expand_from_definition: HashSet<Ustr>,
+    pub explicit_macros: Vec<String>,
+    pub implementation_macros: HashSet<Ustr>,
+
+    pub exclude: HashSet<String>,
+    pub include: HashSet<String>,
 }
 
 #[derive(Debug)]
 pub struct ModuleConfig {
-    pub name: String,
-    pub output_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -39,26 +48,6 @@ impl ConfigIncludePath {
             Self::Conditional { path, .. } => path,
         }
     }
-}
-
-#[derive(Debug)]
-pub struct HeaderConfig {
-    pub library_headers: Vec<ConfigIncludePath>,
-    pub include_dirs: Vec<PathBuf>,
-    pub header_guard_format: Option<Regex>,
-}
-
-#[derive(Debug)]
-pub struct MacroConfig {
-    pub expand_from_definition: HashSet<Ustr>,
-    pub explicit_macros: Vec<String>,
-    pub implementation_macros: HashSet<Ustr>,
-}
-
-#[derive(Debug)]
-pub struct SymbolConfig {
-    pub exclude: HashSet<String>,
-    pub include: HashSet<String>,
 }
 
 impl Config {
@@ -91,7 +80,7 @@ impl Config {
             .map(|s| s.as_str())
             .map(Ustr::from)
             .collect();
-        
+
         let implementation_macros = source_config.macros.implementation_macros.iter()
         .chain(cli.implementation_macros.iter())
         .map(|s| s.as_str())
@@ -99,40 +88,32 @@ impl Config {
         .collect();
 
         Ok(Self {
-                module: ModuleConfig {
-                    name,
-                    output_path
-                },
-                headers: HeaderConfig {
-                    library_headers: cli.headers.into_iter()
-                        .map(ConfigIncludePath::Unconditional)
-                        .chain(source_config.headers.library_headers)
-                        .unique_by(|h| h.path().clone())
-                        .sorted_by(|a, b| a.path().cmp(b.path()))
-                        .collect(),
-                    include_dirs: cli.include_dirs.into_iter()
-                        .chain(source_config.headers.include_dirs)
-                        .unique()
-                        .collect(),
-                    header_guard_format: cli.header_guard
-                        .and_then(|s| Regex::new(&s).ok())
-                        .or(source_config.headers.header_guard_format)
-                },
-                macros: MacroConfig {
-                    explicit_macros,
-                    expand_from_definition,
-                    implementation_macros
-                },
-                symbols: SymbolConfig {
-                    exclude: cli.exclude_symbols.into_iter()
-                        .chain(source_config.symbols.exclude)
-                        .unique()
-                        .collect(),
-                    include: cli.include_symbols.into_iter()
-                        .chain(source_config.symbols.include)
-                        .unique()
-                        .collect(),
-                }
+            name,
+            output_path,
+            library_headers: cli.headers.into_iter()
+                .map(ConfigIncludePath::Unconditional)
+                .chain(source_config.headers.library_headers)
+                .unique_by(|h| h.path().clone())
+                .sorted_by(|a, b| a.path().cmp(b.path()))
+                .collect(),
+            include_dirs: cli.include_dirs.into_iter()
+                .chain(source_config.headers.include_dirs)
+                .unique()
+                .collect(),
+            header_guard_format: cli.header_guard
+                .and_then(|s| Regex::new(&s).ok())
+                .or(source_config.headers.header_guard_format),
+            explicit_macros,
+            expand_from_definition,
+            implementation_macros,
+            exclude: cli.exclude_symbols.into_iter()
+                .chain(source_config.symbols.exclude)
+                .unique()
+                .collect(),
+            include: cli.include_symbols.into_iter()
+                .chain(source_config.symbols.include)
+                .unique()
+                .collect(),
             })
     }
 }

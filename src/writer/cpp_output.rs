@@ -7,12 +7,12 @@ use crate::writer::symbols::SymbolWriteContext;
 
 impl Config {
     pub fn output_module(&self) -> anyhow::Result<()> {
-        let file = std::fs::File::create(&self.module.output_path)?;
+        let file = std::fs::File::create(&self.output_path)?;
         let mut writer = IndentedWriter::new(file);
 
         let mut includes = String::new();
 
-        for header in &self.headers.library_headers {
+        for header in &self.library_headers {
             match header {
                 ConfigIncludePath::Unconditional(file) => {
                     let header_file = file.display();
@@ -29,7 +29,7 @@ impl Config {
 
         writer.write_all(b"module;\n\n")?;
         writer.write_all(includes.as_bytes())?;
-        let name = &self.module.name;
+        let name = &self.name;
         writer.write_fmt(format_args!("\nexport module {name};\n"))?;
 
         if translation_unit.has_macros() {
