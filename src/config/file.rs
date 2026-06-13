@@ -1,4 +1,5 @@
-use crate::config::config::{ConfigBuilder, IncludePath};
+use crate::config::OptionsBuilder;
+use crate::config::config::IncludePath;
 use regex::Regex;
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -60,7 +61,7 @@ impl FileConfig {
     }
 }
 
-impl ConfigBuilder {
+impl OptionsBuilder {
     pub fn apply_file_config(&mut self, config: FileConfig) -> &mut Self {
         if let Some(name) = config.module.name {
             self.name(name);

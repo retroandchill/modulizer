@@ -1,6 +1,6 @@
 use clap::Parser;
 use modulizer::config::file::FileConfig;
-use modulizer::config::{ConfigBuilder, IncludePath};
+use modulizer::config::{IncludePath, OptionsBuilder};
 use regex::Regex;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -62,7 +62,7 @@ pub trait ApplyCliArgs {
     fn apply_cli_args(&mut self, cli: CliArgs) -> anyhow::Result<&mut Self>;
 }
 
-impl ApplyCliArgs for ConfigBuilder {
+impl ApplyCliArgs for OptionsBuilder {
     fn apply_cli_args(&mut self, cli: CliArgs) -> anyhow::Result<&mut Self> {
         if cli.config.exists() {
             self.apply_file_config(FileConfig::load(cli.config)?);

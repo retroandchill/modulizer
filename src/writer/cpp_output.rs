@@ -1,11 +1,11 @@
-use crate::config::{Config, IncludePath};
+use crate::config::{IncludePath, Options};
 use crate::parser::translation::TranslationUnit;
 use crate::writer::IndentedWriter;
 use crate::writer::symbols::SymbolWriteContext;
 use std::fmt::Write as FmtWrite;
 use std::io::Write;
 
-impl Config {
+impl Options {
     pub fn output_module(&self) -> anyhow::Result<()> {
         let file = std::fs::File::create(&self.output_path)?;
         let mut writer = IndentedWriter::new(file);
@@ -18,13 +18,13 @@ impl Config {
                     let header_file = file.display();
                     includes.write_fmt(format_args!("#include <{header_file}>\n"))?;
                 }
-                IncludePath::IfDefinined { path, if_defined } => {
+                IncludePath::IfDefined { path, if_defined } => {
                     let header_file = path.display();
                     includes.write_fmt(format_args!(
                         "#ifdef {if_defined}\n#include <{header_file}>\n#endif\n"
                     ))?;
                 }
-                IncludePath::IfConditioned { path, condition } => {
+                IncludePath::Conditioned { path, condition } => {
                     let header_file = path.display();
                     includes.write_fmt(format_args!(
                         "#if {condition}\n#include <{header_file}>\n#endif\n"

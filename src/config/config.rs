@@ -13,7 +13,7 @@ static MACRO_NAME_REGEX: Lazy<Regex> =
 
 #[derive(Debug, Default, Builder)]
 #[builder(build_fn(validate = "Self::validate"))]
-pub struct Config {
+pub struct Options {
     pub name: String,
 
     #[builder(default = "self.default_output_path()?")]
@@ -48,21 +48,21 @@ pub struct Config {
 #[serde(untagged)]
 pub enum IncludePath {
     Unconditional(PathBuf),
-    IfDefinined { path: PathBuf, if_defined: String },
-    IfConditioned { path: PathBuf, condition: String },
+    IfDefined { path: PathBuf, if_defined: String },
+    Conditioned { path: PathBuf, condition: String },
 }
 
 impl IncludePath {
     pub fn path(&self) -> &PathBuf {
         match self {
             Self::Unconditional(path) => path,
-            Self::IfDefinined { path, .. } => path,
-            Self::IfConditioned { path, .. } => path,
+            Self::IfDefined { path, .. } => path,
+            Self::Conditioned { path, .. } => path,
         }
     }
 }
 
-impl ConfigBuilder {
+impl OptionsBuilder {
     fn default_output_path(&self) -> Result<PathBuf, String> {
         self.name
             .as_ref()

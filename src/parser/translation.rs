@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::Options;
 use crate::parser::grammar::{GuardedTokens, PreprocessorGuard, Token};
 use crate::parser::macros::{ExpandableSyntax, MacroExpansionCandidate, parse_expandable_syntax};
 use crate::parser::preprocessor::{
@@ -21,7 +21,7 @@ pub struct TranslationUnit {
 }
 
 struct TranslationUnitState<'a> {
-    config: &'a Config,
+    config: &'a Options,
     tokens: Vec<GuardedTokens>,
     definitions: HashMap<Ustr, DefineDirective>,
     header_stack: VecDeque<PathBuf>,
@@ -31,7 +31,7 @@ struct TranslationUnitState<'a> {
 }
 
 impl TranslationUnit {
-    pub fn new(config: &Config, source: &str) -> anyhow::Result<Self> {
+    pub fn new(config: &Options, source: &str) -> anyhow::Result<Self> {
         let mut state = TranslationUnitState {
             config,
             tokens: Vec::new(),
@@ -66,7 +66,7 @@ impl TranslationUnit {
     }
 }
 
-fn get_initial_macro_definitions(config: &Config) -> HashMap<Ustr, DefineDirective> {
+fn get_initial_macro_definitions(config: &Options) -> HashMap<Ustr, DefineDirective> {
     let mut definitions = HashMap::new();
     for directive in &config.explicit_macros {
         let Some((name, replacement)) = directive.split_once("=") else {
