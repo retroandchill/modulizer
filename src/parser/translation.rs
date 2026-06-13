@@ -8,7 +8,7 @@ use ustr::{Ustr, UstrMap};
 use crate::config::Config;
 use crate::parser::grammar::{GuardedTokens, PreprocessorGuard, Token};
 use crate::parser::macros::{parse_expandable_syntax, ExpandableSyntax, MacroExpansionCandidate};
-use crate::parser::preprocessor::{collect_statements, parse_include_expansion, ConditionalDirective, DefineDirective, DirectiveStatement, IncludeDirective, IncludePath, MacroParameters, PreprocessorStatement};
+use crate::parser::preprocessor::{collect_statements, get_macro_definition_and_parameters, parse_include_expansion, ConditionalDirective, DefineDirective, DirectiveStatement, IncludeDirective, IncludePath, MacroParameters, PreprocessorStatement};
 use crate::parser::symbols::{parse_symbols, Namespace, Symbol, SymbolKind};
 
 pub struct TranslationUnit {
@@ -65,21 +65,32 @@ impl TranslationUnit {
 fn get_initial_macro_definitions(config: &Config) -> HashMap<Ustr, DefineDirective> {
     let mut definitions = HashMap::new();
     for directive in &config.macros.explicit_macros {
-        let directive = Ustr::from(directive);
         let Some((name, replacement)) = directive.split_once("=") else {
-            definitions.insert(directive.clone(), DefineDirective {
-                name: directive,
-                parameters: None,
+            let tokens = lex(directive.as_str());
+            let result = get_macro_definition_and_parameters(&tokens);
+            let Ok((name, parameters)) = result else {
+                println!("Failed to parse macro definition: {}", result.unwrap_err());
+                continue;
+            };
+            definitions.insert(name.clone(), DefineDirective {
+                name,
+                parameters,
                 replacement: Rc::new([]),
             });
             continue;
         };
 
-        let tokens = lex(replacement);
-        definitions.insert(Ustr::from(name), DefineDirective {
-            name: directive,
-            parameters: None,
-            replacement: Rc::from(tokens),
+        let declaration_tokens = lex(name);
+        let result = get_macro_definition_and_parameters(&declaration_tokens);
+        let Ok((name, parameters)) = result else {
+            println!("Failed to parse macro definition: {}", result.unwrap_err());
+            continue;
+        };
+        let definition_tokens = lex(replacement);
+        definitions.insert(name.clone(), DefineDirective {
+            name,
+            parameters,
+            replacement: Rc::from(definition_tokens),
         });
     }
     definitions

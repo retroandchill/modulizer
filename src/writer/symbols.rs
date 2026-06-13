@@ -41,6 +41,11 @@ impl<'a, W: Write> SymbolWriteContext<'a, W> {
             format!("{}::{}", full_scope, name)
         };
         match &symbol.kind {
+            SymbolKind::ExternBlock(symbols) => {
+                for symbol in symbols {
+                    self.emit_symbol(symbol, namespace_name, &current_scope)?;
+                }
+            }
             SymbolKind::Namespace(namespace) => {
                 if !namespace.is_inline {
                     self.writer

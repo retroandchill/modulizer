@@ -1,5 +1,5 @@
 use crate::parser::grammar::{GuardedToken, PreprocessorGuard, Token};
-use crate::parser::structure::{Delimiter, TokenGroup, TokenNode, collect_token_nodes, strip_attributes};
+use crate::parser::structure::{Delimiter, TokenGroup, TokenNode, collect_token_nodes};
 use chumsky::container::Seq;
 use chumsky::input::{BorrowInput, ValueInput};
 use chumsky::{IterParser, Parser};
@@ -55,6 +55,7 @@ pub enum SymbolKind {
     UsingNamespace,
     UsingDeclaration,
     NamespaceAlias(String),
+    ExternBlock(Vec<Symbol>),
 }
 
 #[derive(Debug, Clone)]
@@ -79,10 +80,15 @@ impl<'a> SymbolParser<'a> {
         let mut symbols = Vec::new();
 
         while !self.is_at_end() {
+            let start = self.index;
             if let Some(symbol) = self.parse_symbol() {
                 symbols.push(symbol);
-            } else {
-                self.advance();
+            } else if !self.is_at_end() {
+                self.skip_until_semicolon();
+                println!("Unexpected statement in span {}-{}:", start, self.index);
+                for i in start..self.index {
+                    println!("- {}", self.tokens[i]);
+                }
             }
         }
 
@@ -91,6 +97,7 @@ impl<'a> SymbolParser<'a> {
 
     fn parse_symbol(&mut self) -> Option<Symbol> {
         match self.try_peak_token()?.token {
+            Token::Extern => self.parse_extern_block(),
             Token::Inline if self.check_next_token(Token::Namespace).is_some() => {
                 self.advance();
                 self.parse_namespace(true)
@@ -105,6 +112,26 @@ impl<'a> SymbolParser<'a> {
             Token::Template => self.parse_template(),
             _ => self.parse_variable_or_function(),
         }
+    }
+
+    fn parse_extern_block(&mut self) -> Option<Symbol> {
+        let declaration = self.expect_token(Token::Extern)?;
+        if matches!(self.try_peak_token().map(|guarded| guarded.token), Some(Token::StringLiteral(_))) {
+            self.advance();
+        }
+
+        if let Some(group) = self.check_group(Delimiter::Braces) {
+            self.advance();
+            let sub_parser = SymbolParser::new(&group.children);
+            let symbols = sub_parser.parse();
+            return Some(Symbol {
+                name: Ustr::default(),
+                guards: declaration.guards,
+                kind: SymbolKind::ExternBlock(symbols),
+            });
+        }
+
+        self.parse_symbol()
     }
 
     fn parse_namespace(&mut self, is_inline: bool) -> Option<Symbol> {
@@ -166,25 +193,31 @@ impl<'a> SymbolParser<'a> {
     }
 
     fn parse_class_or_struct_declaration(&mut self) -> Option<Option<Ustr>> {
+        let is_specialization ;
         let name = match self.try_peak_token()?.token {
             Token::Identifier(name) => {
                 self.advance();
                 if self.check_token(Token::DoubleColon).is_some() || self.check_token(Token::Less).is_some()
                 {
-                    // This is probably a partial specialization, which can't be exported
-                    return None;
+                    is_specialization = true;
+                }
+                else {
+                    is_specialization = false;
                 }
 
                 // Skip over the base class list if present
                 self.skip_optional_base_class_list()?;
                 Some(name)
             }
-            _ => None,
+            _ => {
+                is_specialization = false;
+                None
+            },
         };
 
 
         self.skip_optional_scope();
-        Some(name)
+        Some(name.filter(|_| !is_specialization))
     }
 
     fn skip_optional_base_class_list(&mut self) -> Option<()> {
@@ -295,9 +328,15 @@ impl<'a> SymbolParser<'a> {
                 self.advance();
                 self.parse_sign_modified_type();
             }
-            Token::Short | Token::Long | Token::LongLong => {
+            Token::Short | Token::LongLong => {
                 self.advance();
                 self.expect_token(Token::Int);
+            }
+            Token::Long => {
+                self.advance();
+                if self.expect_token(Token::Int).is_some() || self.expect_token(Token::Double).is_some() {
+                    return Some(());
+                }
             }
             Token::Int | Token::Char | Token::WChar | Token::Char8 | Token::Char16 | Token::Char32 => {
                 self.advance();
@@ -410,6 +449,9 @@ impl<'a> SymbolParser<'a> {
                 Some(Token::Less) => depth += 1,
                 Some(Token::Greater) => depth = depth.saturating_sub(1),
                 _ => {}
+            }
+            if self.is_at_end() {
+                return None;
             }
             self.advance();
         }
@@ -684,9 +726,16 @@ impl<'a> SymbolParser<'a> {
                 self.parse_sign_modified_type();
                 Some(false)
             }
-            Some(Token::Short | Token::Long | Token::LongLong) => {
+            Some(Token::Short | Token::LongLong) => {
                 self.advance();
                 self.expect_token(Token::Int);
+                Some(false)
+            }
+            Some(Token::Long) => {
+                self.advance();
+                if !self.expect_token(Token::Int).is_some() {
+                    self.expect_token(Token::Double);
+                }
                 Some(false)
             }
             _ => None,
@@ -910,6 +959,9 @@ impl<'a> SymbolParser<'a> {
     }
 
     fn advance(&mut self) {
+        if self.is_at_end() {
+            panic!("Tried to advance past the end of the input");
+        }
         self.index += 1;
     }
 
@@ -947,7 +999,6 @@ pub fn parse_symbols<'tok>(input: &'tok [GuardedToken]) -> Result<Vec<Symbol>, S
     eprintln!("parse_symbols: starting");
 
     let nodes = collect_token_nodes(input);
-    let nodes = strip_attributes(nodes);
     let result = SymbolParser::new(&nodes).parse();
 
     eprintln!("parse_symbols: finished");
@@ -1452,5 +1503,31 @@ mod test {
         assert!(result.is_ok());
         let symbols = result.unwrap();
         assert_declarations(&symbols, &["Foo", "get_bar", "values"]);
+    }
+
+    #[test]
+    fn can_parse_extern_functions() {
+        let code = "extern \"C\" int CFunction();
+                         extern \"C\"
+                         {
+                             void CFunction2();
+                         }";
+        let tokens = lex(code);
+        let guarded = to_guarded_tokens(&tokens);
+        let result = parse_symbols(&guarded);
+        assert!(result.is_ok());
+        let symbols = result.unwrap();
+        assert_eq!(symbols.len(), 2);
+        let symbol1 = &symbols[0];
+        assert_eq!(symbol1.name, "CFunction");
+        assert_matches!(&symbol1.kind, SymbolKind::ExportableSymbol);
+        let symbol2 = &symbols[1];
+        assert_eq!(symbol2.name, "");
+        let SymbolKind::ExternBlock(externed_symbols) = &symbol2.kind else {
+            panic!("Expected ExternBlock, got {:?}", symbol2.kind);
+        };
+        assert_eq!(externed_symbols.len(), 1);
+        assert_eq!(externed_symbols[0].name, "CFunction2");
+        assert_matches!(&externed_symbols[0].kind, SymbolKind::ExportableSymbol);
     }
 }

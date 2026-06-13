@@ -28,15 +28,20 @@ explicit_macros = [
     "FMT_END_NAMESPACE=}",
     "FMT_API",
     "FMT_EXPORT",
+    "FMT_DEPRECATED=[[deprecated]]",
     "FMT_BEGIN_EXPORT",
     "FMT_END_EXPORT",
     "FMT_NORETURN=[[noreturn]]",
-    "FMT_NODISCARD=[[noreturn]]",
+    "FMT_NODISCARD=[[nodiscard]]",
     "FMT_NO_UNIQUE_ADDRESS=[[no_unique_address]]",
     "FMT_CONSTEXPR=constexpr",
     "FMT_CONSTEVAL=consteval",
     "FMT_CONSTEXPR20=constexpr",
-    "FMT_ALWAYS_INLINE=inline"
+    "FMT_ALWAYS_INLINE=inline",
+    "FMT_FUNC=inline",
+    "FMT_INLINE=inline",
+    "FMT_PRAGMA_GCC(x)",
+    "FMT_PRAGMA_CLANG(x)"
 ]
 
 [symbols]

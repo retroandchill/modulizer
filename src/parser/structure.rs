@@ -1,11 +1,12 @@
-use std::rc::Rc;
 use crate::parser::grammar::{GuardedToken, Token};
+use std::fmt::{Display, Formatter};
+use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Delimiter {
     Parentheses,
     Braces,
-    Brackets
+    Brackets,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -18,7 +19,7 @@ pub struct TokenGroup {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenNode {
     Token(GuardedToken),
-    Group(TokenGroup)
+    Group(TokenGroup),
 }
 
 impl TokenNode {
@@ -29,7 +30,7 @@ impl TokenNode {
             None
         }
     }
-    
+
     pub fn try_get_group(&self) -> Option<TokenGroup> {
         if let TokenNode::Group(group) = self {
             Some(group.clone())
@@ -37,9 +38,29 @@ impl TokenNode {
             None
         }
     }
-    
+
     pub fn is_attribute(&self) -> bool {
-        self.try_get_group().is_some_and(|group| group.delimiter == Delimiter::Brackets && group.children.len() == 1 && group.children[0].try_get_group().is_some_and(|group| group.delimiter == Delimiter::Braces))
+        self.try_get_group().is_some_and(|group| {
+            group.delimiter == Delimiter::Brackets
+                && group.children.len() == 1
+                && group.children[0]
+                    .try_get_group()
+                    .is_some_and(|group| group.delimiter == Delimiter::Brackets)
+        })
+    }
+}
+
+impl Display for TokenNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TokenNode::Token(token) => write!(f, "{}", token),
+            TokenNode::Group(group) =>
+            match group.delimiter {
+                Delimiter::Parentheses => write!(f, "(...)"),
+                Delimiter::Braces => write!(f, "{{...}}"),
+                Delimiter::Brackets => write!(f, "[...]"),
+            },
+        }
     }
 }
 
@@ -49,7 +70,11 @@ pub fn collect_token_nodes(nodes: &[GuardedToken]) -> Vec<TokenNode> {
     nodes
 }
 
-fn collect_until(nodes: &[GuardedToken], index: &mut usize, delimiter: Option<Token>) -> (bool, Vec<TokenNode>) {
+fn collect_until(
+    nodes: &[GuardedToken],
+    index: &mut usize,
+    delimiter: Option<Token>,
+) -> (bool, Vec<TokenNode>) {
     let mut result = Vec::new();
     while let Some(guarded) = nodes.get(*index) {
         *index += 1;
@@ -69,15 +94,20 @@ fn collect_until(nodes: &[GuardedToken], index: &mut usize, delimiter: Option<To
             }
             Token::LBracket => {
                 let (terminated, children) = collect_until(nodes, index, Some(Token::RBracket));
-                result.push(TokenNode::Group(TokenGroup {
+                let node = TokenNode::Group(TokenGroup {
                     delimiter: Delimiter::Brackets,
                     children: Rc::from(children),
                     terminated,
-                }));
+                });
+                if node.is_attribute()
+                {
+                    continue;
+                }
+                result.push(node);
             }
             Token::LParen => {
                 let (terminated, children) = collect_until(nodes, index, Some(Token::RParen));
-                result.push(TokenNode::Group( TokenGroup{
+                result.push(TokenNode::Group(TokenGroup {
                     delimiter: Delimiter::Parentheses,
                     children: Rc::from(children),
                     terminated,
@@ -90,16 +120,4 @@ fn collect_until(nodes: &[GuardedToken], index: &mut usize, delimiter: Option<To
     }
 
     (false, result)
-}
-
-pub fn strip_attributes(tokens: Vec<TokenNode>) -> Vec<TokenNode> {
-    let mut nodes = Vec::with_capacity(tokens.len());
-    for node in tokens {
-        if node.is_attribute() {
-            continue;
-        }
-        
-        nodes.push(node);
-    }
-    nodes   
 }

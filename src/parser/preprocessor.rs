@@ -284,6 +284,15 @@ where
         })
 }
 
+fn macro_definition_name<'tok, I>() -> impl Parser<'tok, I, (Ustr, Option<MacroParameters>), extra::Err<Rich<'tok, Token>>>
+where
+    I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
+    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+{
+    identifier().
+        then(macro_parameters().or_not())
+}
+
 fn trim_replacement(tokens: &[Token]) -> Rc<[Token]> {
     let mut result = Vec::new();
 
@@ -302,6 +311,14 @@ fn trim_replacement(tokens: &[Token]) -> Rc<[Token]> {
         }
     }
     Rc::from(result)
+}
+
+pub fn get_macro_definition_and_parameters(tokens: &[Token]) -> Result<(Ustr, Option<MacroParameters>), PreprocessorError<'_>> {
+    macro_definition_name()
+        .parse(tokens).into_result()
+        .map_err(|errs| PreprocessorError {
+            errors: errs,
+        })
 }
 
 fn undef_directive<'tok, I>(
