@@ -6,6 +6,7 @@ use std::str::Utf8Error;
 use ustr::Ustr;
 
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct StringView {
     data: *const u8,
     length: usize,
