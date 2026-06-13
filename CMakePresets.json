@@ -1,0 +1,60 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "vcpkg-submodule",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": {
+          "type": "FILEPATH",
+          "value": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+        }
+      }
+    },
+    {
+      "name": "debug-static",
+      "displayName": "Debug Static",
+      "description": "Debug build with static libraries",
+      "inherits": "vcpkg-submodule",
+      "binaryDir": "${sourceDir}/build/debug-static",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MODULIZER_BUILD_SHARED": "OFF"
+      }
+    },
+    {
+      "name": "release-static",
+      "displayName": "Release Static",
+      "description": "Release build with static libraries",
+      "inherits": "vcpkg-submodule",
+      "binaryDir": "${sourceDir}/build/release-static",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MODULIZER_BUILD_SHARED": "OFF"
+      }
+    },
+    {
+      "name": "debug-shared",
+      "displayName": "Debug Shared",
+      "description": "Debug build with shared libraries",
+      "inherits": "vcpkg-submodule",
+      "binaryDir": "${sourceDir}/build/debug-shared",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MODULIZER_BUILD_SHARED": "ON"
+      }
+    },
+    {
+      "name": "release-shared",
+      "displayName": "Release Shared",
+      "description": "Release build with shared libraries",
+      "inherits": "vcpkg-submodule",
+      "binaryDir": "${sourceDir}/build/release-shared",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MODULIZER_BUILD_SHARED": "ON"
+      }
+    }
+  ]
+}
