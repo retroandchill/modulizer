@@ -80,15 +80,10 @@ impl<'a> SymbolParser<'a> {
         let mut symbols = Vec::new();
 
         while !self.is_at_end() {
-            let start = self.index;
             if let Some(symbol) = self.parse_symbol() {
                 symbols.push(symbol);
             } else if !self.is_at_end() {
                 self.skip_until_semicolon();
-                println!("Unexpected statement in span {}-{}:", start, self.index);
-                for i in start..self.index {
-                    println!("- {}", self.tokens[i]);
-                }
             }
         }
 
