@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use itertools::Itertools;
 use logos::Logos;
-use ustr::{Ustr, UstrMap};
+use ustr::{Ustr};
 use crate::config::Config;
 use crate::parser::grammar::{GuardedTokens, PreprocessorGuard, Token};
 use crate::parser::macros::{parse_expandable_syntax, ExpandableSyntax, MacroExpansionCandidate};
@@ -122,6 +122,17 @@ impl<'a> TranslationUnitState<'a> {
 
                         (tokens, expanded) = self.expand_macros(syntax)?;
                     }
+                    
+                    if self.guards.iter().any(|guard| {
+                        match guard {
+                            PreprocessorGuard::Conditional(ConditionalDirective::Ifdef { name }) => {
+                                self.config.macros.implementation_macros.contains(&name)
+                            }
+                            _ => false
+                        }
+                    }) {
+                        continue
+                    }
 
                     let mut guarded_tokens = GuardedTokens::new(self.guards.iter()
                         .filter(|guard| {
@@ -237,13 +248,13 @@ impl<'a> TranslationUnitState<'a> {
     }
 
     fn parse_definition(&mut self, define: DefineDirective) {
-        if self.config.macros.expand_from_definition.contains(define.name.as_str()) {
+        if self.config.macros.expand_from_definition.contains(&define.name) {
             self.definitions.insert(define.name.clone(), define);
         }
     }
 
     fn parse_undefine(&mut self, name: Ustr) {
-        if self.config.macros.expand_from_definition.contains(name.as_str()) {
+        if self.config.macros.expand_from_definition.contains(&name) {
             self.definitions.remove(&name);
         }
     }

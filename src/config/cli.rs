@@ -38,6 +38,9 @@ pub struct CliArgs {
     #[arg(short = 'E', long = "expand")]
     pub expand: Vec<String>,
 
+    #[arg(short = 'I', long = "implementation-macro")]
+    pub implementation_macros: Vec<String>,
+
     /// Add a header entry point.
     #[arg(long = "header")]
     pub headers: Vec<PathBuf>,

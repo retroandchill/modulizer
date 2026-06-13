@@ -6,6 +6,7 @@ use itertools::Itertools;
 use std::path::PathBuf;
 use regex::Regex;
 use serde::Deserialize;
+use ustr::Ustr;
 
 #[derive(Debug)]
 pub struct Config {
@@ -49,8 +50,9 @@ pub struct HeaderConfig {
 
 #[derive(Debug)]
 pub struct MacroConfig {
-    pub expand_from_definition: HashSet<String>,
+    pub expand_from_definition: HashSet<Ustr>,
     pub explicit_macros: Vec<String>,
+    pub implementation_macros: HashSet<Ustr>,
 }
 
 #[derive(Debug)]
@@ -84,9 +86,17 @@ impl Config {
         let mut explicit_macros = source_config.macros.explicit_macros;
         explicit_macros.extend(cli.defines);
 
-        let expand_from_definition = source_config.macros.expand_from_definition.into_iter()
-            .chain(cli.expand.into_iter())
+        let expand_from_definition = source_config.macros.expand_from_definition.iter()
+            .chain(cli.expand.iter())
+            .map(|s| s.as_str())
+            .map(Ustr::from)
             .collect();
+        
+        let implementation_macros = source_config.macros.implementation_macros.iter()
+        .chain(cli.implementation_macros.iter())
+        .map(|s| s.as_str())
+        .map(Ustr::from)
+        .collect();
 
         Ok(Self {
                 module: ModuleConfig {
@@ -111,6 +121,7 @@ impl Config {
                 macros: MacroConfig {
                     explicit_macros,
                     expand_from_definition,
+                    implementation_macros
                 },
                 symbols: SymbolConfig {
                     exclude: cli.exclude_symbols.into_iter()

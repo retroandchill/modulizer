@@ -39,7 +39,10 @@ pub struct FileMacroConfig {
     pub expand_from_definition: Vec<String>,
 
     #[serde(default)]
-    pub explicit_macros: Vec<String>
+    pub explicit_macros: Vec<String>,
+    
+    #[serde(default)]
+    pub implementation_macros: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
