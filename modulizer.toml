@@ -11,7 +11,7 @@ library_headers = [
     "fmt/color.h",
     "fmt/compile.h",
     "fmt/format.h",
-    { path = "fmt/os.h", if_defined = "FMT_OS" },
+    { path = "fmt/os.h", condition = "FMT_OS" },
     "fmt/ostream.h",
     "fmt/printf.h",
     "fmt/ranges.h",

@@ -264,13 +264,17 @@ impl<'a> TranslationUnitState<'a> {
     }
 
     fn parse_definition(&mut self, define: DefineDirective) {
-        if self.config.expand_from_definition.contains(&define.name) {
+        if self
+            .config
+            .expand_macros_from_definition
+            .contains(&define.name)
+        {
             self.definitions.insert(define.name.clone(), define);
         }
     }
 
     fn parse_undefine(&mut self, name: Ustr) {
-        if self.config.expand_from_definition.contains(&name) {
+        if self.config.expand_macros_from_definition.contains(&name) {
             self.definitions.remove(&name);
         }
     }
@@ -412,10 +416,10 @@ impl<'a> TranslationUnitState<'a> {
                 Ustr::from(format!("{}::{}", parent_scope, symbol.name).as_str())
             };
             let is_excluded =
-                parent_is_excluded || self.config.exclude.contains(current_scope.as_str());
+                parent_is_excluded || self.config.exclude_symbols.contains(&current_scope);
             if is_excluded
-                && (self.config.include.contains(current_scope.as_str())
-                    || !self.config.include.iter().any(|include| {
+                && (self.config.include_symbols.contains(&current_scope)
+                    || !self.config.include_symbols.iter().any(|include| {
                         include.starts_with(format!("{}::", current_scope).as_str())
                     }))
             {

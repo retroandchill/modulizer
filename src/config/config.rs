@@ -1,128 +1,102 @@
-use crate::config::cli::CliArgs;
-use crate::config::file::FileConfig;
-use clap::Parser;
 use derive_builder::Builder;
-use itertools::Itertools;
+use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::Deserialize;
-use std::collections::HashSet;
 use std::path::PathBuf;
-use ustr::Ustr;
+use ustr::UstrSet;
+
+static MODULE_NAME_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*$").unwrap());
+
+static MACRO_NAME_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_]*$").unwrap());
 
 #[derive(Debug, Default, Builder)]
+#[builder(build_fn(validate = "Self::validate"))]
 pub struct Config {
     pub name: String,
+
+    #[builder(default = "self.default_output_path()?")]
     pub output_path: PathBuf,
 
-    pub library_headers: Vec<ConfigIncludePath>,
+    #[builder(setter(each(name = "library_header")))]
+    pub library_headers: Vec<IncludePath>,
+
+    #[builder(setter(each(name = "include_dir")))]
     pub include_dirs: Vec<PathBuf>,
+
+    #[builder(setter(strip_option))]
     pub header_guard_format: Option<Regex>,
 
-    pub expand_from_definition: HashSet<Ustr>,
+    #[builder(setter(each(name = "expand_macro_from_definition")), default)]
+    pub expand_macros_from_definition: UstrSet,
+
+    #[builder(setter(each(name = "explicit_macro")))]
     pub explicit_macros: Vec<String>,
-    pub implementation_macros: HashSet<Ustr>,
 
-    pub exclude: HashSet<String>,
-    pub include: HashSet<String>,
+    #[builder(setter(each(name = "implementation_macro")), default)]
+    pub implementation_macros: UstrSet,
+
+    #[builder(setter(each(name = "exclude_symbol")), default)]
+    pub exclude_symbols: UstrSet,
+
+    #[builder(setter(each(name = "include_symbol")), default)]
+    pub include_symbols: UstrSet,
 }
-
-#[derive(Debug)]
-pub struct ModuleConfig {}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
-pub enum ConfigIncludePath {
+pub enum IncludePath {
     Unconditional(PathBuf),
-    Conditional { path: PathBuf, if_defined: String },
+    IfDefinined { path: PathBuf, if_defined: String },
+    IfConditioned { path: PathBuf, condition: String },
 }
 
-impl ConfigIncludePath {
+impl IncludePath {
     pub fn path(&self) -> &PathBuf {
         match self {
             Self::Unconditional(path) => path,
-            Self::Conditional { path, .. } => path,
+            Self::IfDefinined { path, .. } => path,
+            Self::IfConditioned { path, .. } => path,
         }
     }
 }
 
-impl Config {
-    pub fn load_from_args() -> anyhow::Result<Self> {
-        let cli = CliArgs::try_parse()?;
-        Self::load(cli)
+impl ConfigBuilder {
+    fn default_output_path(&self) -> Result<PathBuf, String> {
+        self.name
+            .as_ref()
+            .map(|name| PathBuf::from(format!("{}.ixx", name)))
+            .ok_or("No name configured".to_string())
     }
 
-    pub fn load(cli: CliArgs) -> anyhow::Result<Self> {
-        let source_config = FileConfig::load(cli.config)
-            .inspect_err(|e| {
-                println!("Failed to load config file: {}", e);
-            })
-            .unwrap_or_default();
-        let name = cli
-            .module_name
-            .or(source_config.module.name)
-            .ok_or_else(|| anyhow::anyhow!("Module name is required"))?;
-        let output_path = match cli.output.or(source_config.module.output) {
-            Some(path) => path,
-            None => std::env::current_dir()?.join(format!("{name}.ixx")),
-        };
+    fn validate(&self) -> Result<(), String> {
+        if let Some(ref name) = self.name {
+            if !MODULE_NAME_REGEX.is_match(name) {
+                return Err("Module is not a valid C++ module name".to_string());
+            }
+        }
 
-        let mut explicit_macros = source_config.macros.explicit_macros;
-        explicit_macros.extend(cli.defines);
+        for macro_name in self.expand_macros_from_definition.iter().flatten() {
+            if !MACRO_NAME_REGEX.is_match(macro_name) {
+                return Err(format!(
+                    "Macro name `{}` is not a valid C++ macro name",
+                    macro_name
+                ));
+            }
+        }
 
-        let expand_from_definition = source_config
-            .macros
-            .expand_from_definition
-            .iter()
-            .chain(cli.expand.iter())
-            .map(|s| s.as_str())
-            .map(Ustr::from)
-            .collect();
+        if let Some(ref excluded_symbols) = self.exclude_symbols {
+            for included_symbol in self.include_symbols.iter().flatten() {
+                if excluded_symbols.contains(included_symbol) {
+                    return Err(format!(
+                        "Symbol `{}` is both excluded and included",
+                        included_symbol
+                    ));
+                }
+            }
+        }
 
-        let implementation_macros = source_config
-            .macros
-            .implementation_macros
-            .iter()
-            .chain(cli.implementation_macros.iter())
-            .map(|s| s.as_str())
-            .map(Ustr::from)
-            .collect();
-
-        Ok(Self {
-            name,
-            output_path,
-            library_headers: cli
-                .headers
-                .into_iter()
-                .map(ConfigIncludePath::Unconditional)
-                .chain(source_config.headers.library_headers)
-                .unique_by(|h| h.path().clone())
-                .sorted_by(|a, b| a.path().cmp(b.path()))
-                .collect(),
-            include_dirs: cli
-                .include_dirs
-                .into_iter()
-                .chain(source_config.headers.include_dirs)
-                .unique()
-                .collect(),
-            header_guard_format: cli
-                .header_guard
-                .and_then(|s| Regex::new(&s).ok())
-                .or(source_config.headers.header_guard_format),
-            explicit_macros,
-            expand_from_definition,
-            implementation_macros,
-            exclude: cli
-                .exclude_symbols
-                .into_iter()
-                .chain(source_config.symbols.exclude)
-                .unique()
-                .collect(),
-            include: cli
-                .include_symbols
-                .into_iter()
-                .chain(source_config.symbols.include)
-                .unique()
-                .collect(),
-        })
+        Ok(())
     }
 }
