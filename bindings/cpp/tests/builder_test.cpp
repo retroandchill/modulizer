@@ -6,7 +6,8 @@ import modulizer;
 
 using namespace modulizer;
 
-TEST_CASE("Can create builder", "[builder]") {
-  OptionsBuilder builder;
-  auto options = builder.name("test").build();
+TEST_CASE("Can create builder", "[builder]")
+{
+    OptionsBuilder builder;
+    auto options = builder.name("test").build();
 }

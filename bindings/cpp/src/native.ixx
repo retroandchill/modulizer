@@ -8,6 +8,8 @@ module;
 export module modulizer:native;
 
 #define MODULIZER_EXPORT_MODULE
-export {
+
+export
+{
 #include <modulizer.h>
 }
