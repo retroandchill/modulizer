@@ -18,7 +18,10 @@ impl<'a, W: Write> SymbolWriteContext<'a, W> {
         }
     }
 
-    pub fn emit_symbols<'b>(&mut self, symbols: impl IntoIterator<Item = &'b Symbol>) -> std::io::Result<()> {
+    pub fn emit_symbols<'b>(
+        &mut self,
+        symbols: impl IntoIterator<Item = &'b Symbol>,
+    ) -> std::io::Result<()> {
         for symbol in symbols {
             self.emit_symbol(symbol, "", "")?;
         }
@@ -30,7 +33,7 @@ impl<'a, W: Write> SymbolWriteContext<'a, W> {
         &mut self,
         symbol: &Symbol,
         namespace_name: &str,
-        full_scope: &str
+        full_scope: &str,
     ) -> std::io::Result<()> {
         self.update_guards(&symbol.guards)?;
 
@@ -66,16 +69,20 @@ impl<'a, W: Write> SymbolWriteContext<'a, W> {
                 }
             }
             SymbolKind::ExportableSymbol => {
-                self.writer.write_fmt(format_args!("export using {namespace_name}::{name};\n"))?;
+                self.writer
+                    .write_fmt(format_args!("export using {namespace_name}::{name};\n"))?;
             }
             SymbolKind::UsingDeclaration => {
-                self.writer.write_fmt(format_args!("export using {name};\n"))?;
+                self.writer
+                    .write_fmt(format_args!("export using {name};\n"))?;
             }
             SymbolKind::UsingNamespace => {
-                self.writer.write_fmt(format_args!("export using namespace {name};\n"))?;
+                self.writer
+                    .write_fmt(format_args!("export using namespace {name};\n"))?;
             }
             SymbolKind::NamespaceAlias(target) => {
-                self.writer.write_fmt(format_args!("export namespace {name} = {target};\n"))?;
+                self.writer
+                    .write_fmt(format_args!("export namespace {name} = {target};\n"))?;
             }
         }
 

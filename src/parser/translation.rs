@@ -1,15 +1,19 @@
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::collections::hash_map::Entry;
-use std::path::PathBuf;
-use std::rc::Rc;
-use itertools::Itertools;
-use logos::Logos;
-use ustr::{Ustr};
 use crate::config::Config;
 use crate::parser::grammar::{GuardedTokens, PreprocessorGuard, Token};
-use crate::parser::macros::{parse_expandable_syntax, ExpandableSyntax, MacroExpansionCandidate};
-use crate::parser::preprocessor::{collect_statements, get_macro_definition_and_parameters, parse_include_expansion, ConditionalDirective, DefineDirective, DirectiveStatement, IncludeDirective, IncludePath, MacroParameters, PreprocessorStatement};
-use crate::parser::symbols::{parse_symbols, Namespace, Symbol, SymbolKind};
+use crate::parser::macros::{ExpandableSyntax, MacroExpansionCandidate, parse_expandable_syntax};
+use crate::parser::preprocessor::{
+    ConditionalDirective, DefineDirective, DirectiveStatement, IncludeDirective, IncludePath,
+    MacroParameters, PreprocessorStatement, collect_statements,
+    get_macro_definition_and_parameters, parse_include_expansion,
+};
+use crate::parser::symbols::{Namespace, Symbol, SymbolKind, parse_symbols};
+use itertools::Itertools;
+use logos::Logos;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::PathBuf;
+use std::rc::Rc;
+use ustr::Ustr;
 
 pub struct TranslationUnit {
     symbols: Vec<Symbol>,
@@ -40,7 +44,6 @@ impl TranslationUnit {
 
         state.parse_content(source)?;
 
-
         Ok(Self {
             symbols: state.collect_symbols()?,
             macros: state.all_macros,
@@ -52,7 +55,8 @@ impl TranslationUnit {
     }
 
     pub fn macros(&self) -> impl Iterator<Item = &str> {
-        self.macros.iter()
+        self.macros
+            .iter()
             .map(|macro_name| macro_name.as_str())
             .sorted()
     }
@@ -72,11 +76,14 @@ fn get_initial_macro_definitions(config: &Config) -> HashMap<Ustr, DefineDirecti
                 println!("Failed to parse macro definition: {}", result.unwrap_err());
                 continue;
             };
-            definitions.insert(name.clone(), DefineDirective {
-                name,
-                parameters,
-                replacement: Rc::new([]),
-            });
+            definitions.insert(
+                name.clone(),
+                DefineDirective {
+                    name,
+                    parameters,
+                    replacement: Rc::new([]),
+                },
+            );
             continue;
         };
 
@@ -87,20 +94,21 @@ fn get_initial_macro_definitions(config: &Config) -> HashMap<Ustr, DefineDirecti
             continue;
         };
         let definition_tokens = lex(replacement);
-        definitions.insert(name.clone(), DefineDirective {
-            name,
-            parameters,
-            replacement: Rc::from(definition_tokens),
-        });
+        definitions.insert(
+            name.clone(),
+            DefineDirective {
+                name,
+                parameters,
+                replacement: Rc::from(definition_tokens),
+            },
+        );
     }
     definitions
 }
 
 fn lex(source: &str) -> Vec<Token> {
     Token::lexer(source)
-        .filter_map(|result| {
-            result.ok()
-        })
+        .filter_map(|result| result.ok())
         .collect()
 }
 
@@ -122,37 +130,37 @@ impl<'a> TranslationUnitState<'a> {
 
                         (tokens, expanded) = self.expand_macros(syntax)?;
                     }
-                    
-                    if self.guards.iter().any(|guard| {
-                        match guard {
-                            PreprocessorGuard::Conditional(ConditionalDirective::Ifdef { name }) => {
-                                self.config.implementation_macros.contains(&name)
-                            }
-                            _ => false
+
+                    if self.guards.iter().any(|guard| match guard {
+                        PreprocessorGuard::Conditional(ConditionalDirective::Ifdef { name }) => {
+                            self.config.implementation_macros.contains(&name)
                         }
+                        _ => false,
                     }) {
-                        continue
+                        continue;
                     }
 
-                    let mut guarded_tokens = GuardedTokens::new(self.guards.iter()
-                        .filter(|guard| {
-                            match guard {
-                                PreprocessorGuard::Conditional(ConditionalDirective::Ifndef { name }) => {
-                                    self.config.header_guard_format.as_ref().map(|r| {
-                                        !r.is_match(name)
-                                    })
-                                        .unwrap_or(true)
-                                }
+                    let mut guarded_tokens = GuardedTokens::new(
+                        self.guards
+                            .iter()
+                            .filter(|guard| match guard {
+                                PreprocessorGuard::Conditional(ConditionalDirective::Ifndef {
+                                    name,
+                                }) => self
+                                    .config
+                                    .header_guard_format
+                                    .as_ref()
+                                    .map(|r| !r.is_match(name))
+                                    .unwrap_or(true),
                                 _ => true,
-                            }
-                        })
-                        .cloned());
+                            })
+                            .cloned(),
+                    );
                     guarded_tokens.append(tokens.into_iter());
                     self.tokens.push(guarded_tokens);
                 }
             }
         }
-
 
         self.header_stack.pop_back();
 
@@ -204,20 +212,28 @@ impl<'a> TranslationUnitState<'a> {
 
                 let (tokens, expanded) = self.expand_macros(syntax)?;
                 if !expanded {
-                    return Err(anyhow::anyhow!("Failed to expand macro into a valid include"));
+                    return Err(anyhow::anyhow!(
+                        "Failed to expand macro into a valid include"
+                    ));
                 }
 
                 let expansion = parse_include_expansion(&tokens)
                     .map_err(|err| anyhow::anyhow!("Failed to parse include expansion: {}", err))?;
 
                 self.parse_include(expansion)
-            },
+            }
         }
     }
 
-    fn try_expand_header(&mut self, path: PathBuf, search_current_path: bool) -> anyhow::Result<()> {
+    fn try_expand_header(
+        &mut self,
+        path: PathBuf,
+        search_current_path: bool,
+    ) -> anyhow::Result<()> {
         let mut target = None;
-        if let Some(parent) = self.header_stack.back().and_then(|h| h.parent()) && search_current_path {
+        if let Some(parent) = self.header_stack.back().and_then(|h| h.parent())
+            && search_current_path
+        {
             target = Some(parent.join(&path)).filter(|p| p.exists());
         }
 
@@ -244,7 +260,7 @@ impl<'a> TranslationUnitState<'a> {
 
         self.parse_content(&source)?;
 
-       Ok(())
+        Ok(())
     }
 
     fn parse_definition(&mut self, define: DefineDirective) {
@@ -261,10 +277,15 @@ impl<'a> TranslationUnitState<'a> {
 
     fn parse_conditional(&mut self, conditional: ConditionalDirective) -> anyhow::Result<()> {
         match &conditional {
-            ConditionalDirective::If { .. }| ConditionalDirective::Ifdef { .. } | ConditionalDirective::Ifndef { .. } => {
-                self.guards.push_back(PreprocessorGuard::Conditional(conditional));
+            ConditionalDirective::If { .. }
+            | ConditionalDirective::Ifdef { .. }
+            | ConditionalDirective::Ifndef { .. } => {
+                self.guards
+                    .push_back(PreprocessorGuard::Conditional(conditional));
             }
-            ConditionalDirective::Elif { .. } | ConditionalDirective::Elifdef { .. } | ConditionalDirective::Elifndef { .. } => {
+            ConditionalDirective::Elif { .. }
+            | ConditionalDirective::Elifdef { .. }
+            | ConditionalDirective::Elifndef { .. } => {
                 let Some(guard) = self.guards.back_mut() else {
                     return Err(anyhow::anyhow!("Elif without preceding if"));
                 };
@@ -274,7 +295,10 @@ impl<'a> TranslationUnitState<'a> {
         Ok(())
     }
 
-    fn expand_macros(&mut self, syntax: Vec<ExpandableSyntax>) -> anyhow::Result<(Vec<Token>, bool)> {
+    fn expand_macros(
+        &mut self,
+        syntax: Vec<ExpandableSyntax>,
+    ) -> anyhow::Result<(Vec<Token>, bool)> {
         let mut tokens = Vec::new();
         let mut expanded = false;
         for expression in syntax {
@@ -291,7 +315,11 @@ impl<'a> TranslationUnitState<'a> {
         Ok((tokens, expanded))
     }
 
-    fn try_expand_macro(&mut self, candidate: MacroExpansionCandidate, tokens: &mut Vec<Token>) -> anyhow::Result<bool> {
+    fn try_expand_macro(
+        &mut self,
+        candidate: MacroExpansionCandidate,
+        tokens: &mut Vec<Token>,
+    ) -> anyhow::Result<bool> {
         let Some(definition) = self.definitions.get(&candidate.name) else {
             tokens.push(Token::Identifier(candidate.name));
             if let Some(mut parameters) = candidate.parameters {
@@ -302,7 +330,13 @@ impl<'a> TranslationUnitState<'a> {
 
         match &definition.parameters {
             Some(parameters) => {
-                expand_functional_macro(candidate, &definition.name, parameters, &definition.replacement, tokens)?;
+                expand_functional_macro(
+                    candidate,
+                    &definition.name,
+                    parameters,
+                    &definition.replacement,
+                    tokens,
+                )?;
                 Ok(true)
             }
             None => {
@@ -313,11 +347,12 @@ impl<'a> TranslationUnitState<'a> {
                 Ok(true)
             }
         }
-
     }
 
     fn collect_symbols(&self) -> anyhow::Result<Vec<Symbol>> {
-        let tokens = self.tokens.iter()
+        let tokens = self
+            .tokens
+            .iter()
             .flat_map(|guard| guard.into_iter())
             .collect::<Vec<_>>();
 
@@ -329,7 +364,12 @@ impl<'a> TranslationUnitState<'a> {
         Ok(symbols)
     }
 
-    fn merge_symbol_sets(&self, raw_symbols: Vec<Symbol>, parent_scope: &str, parent_is_excluded: bool) -> Vec<Symbol> {
+    fn merge_symbol_sets(
+        &self,
+        raw_symbols: Vec<Symbol>,
+        parent_scope: &str,
+        parent_is_excluded: bool,
+    ) -> Vec<Symbol> {
         let mut symbols = Vec::with_capacity(raw_symbols.len());
         let mut seen_symbols = HashMap::new();
         for symbol in raw_symbols {
@@ -338,8 +378,14 @@ impl<'a> TranslationUnitState<'a> {
                     continue;
                 }
 
-                if let Some(Symbol { kind: SymbolKind::Namespace(existing_namespace), guards, .. }) = seen_symbols.get(&symbol.name)
-                    .and_then(|index| -> Option<&mut Symbol> { symbols.get_mut(*index) }) {
+                if let Some(Symbol {
+                    kind: SymbolKind::Namespace(existing_namespace),
+                    guards,
+                    ..
+                }) = seen_symbols
+                    .get(&symbol.name)
+                    .and_then(|index| -> Option<&mut Symbol> { symbols.get_mut(*index) })
+                {
                     existing_namespace.symbols.append(&mut namespace.symbols);
                     *guards = reduce_guard_set(guards.clone(), symbol.guards);
                 } else {
@@ -365,23 +411,33 @@ impl<'a> TranslationUnitState<'a> {
             } else {
                 Ustr::from(format!("{}::{}", parent_scope, symbol.name).as_str())
             };
-            let is_excluded = parent_is_excluded || self.config.exclude.contains(current_scope.as_str());
-            if is_excluded && (self.config.include.contains(current_scope.as_str()) || !self.config.include.iter().any(|include| include.starts_with(format!("{}::", current_scope).as_str()))) {
+            let is_excluded =
+                parent_is_excluded || self.config.exclude.contains(current_scope.as_str());
+            if is_excluded
+                && (self.config.include.contains(current_scope.as_str())
+                    || !self.config.include.iter().any(|include| {
+                        include.starts_with(format!("{}::", current_scope).as_str())
+                    }))
+            {
                 continue;
             }
 
             if let SymbolKind::Namespace(namespace) = symbol.kind {
-                let mut merged_symbols = self.merge_symbol_sets(namespace.symbols, &current_scope, is_excluded);
+                let mut merged_symbols =
+                    self.merge_symbol_sets(namespace.symbols, &current_scope, is_excluded);
                 let mut name = symbol.name;
                 if merged_symbols.len() == 1 {
-                    if let Some(Symbol { kind: SymbolKind::Namespace(sub_namespace), name: sub_name, guards }) = merged_symbols.pop_if(|symbol| {
-                        matches!(symbol.kind, SymbolKind::Namespace(_))
-                    }) {
+                    if let Some(Symbol {
+                        kind: SymbolKind::Namespace(sub_namespace),
+                        name: sub_name,
+                        guards,
+                    }) = merged_symbols
+                        .pop_if(|symbol| matches!(symbol.kind, SymbolKind::Namespace(_)))
+                    {
                         if !sub_namespace.is_inline {
                             merged_symbols = sub_namespace.symbols;
                             name = Ustr::from(format!("{}::{}", name, sub_name).as_str());
-                        }
-                        else {
+                        } else {
                             merged_symbols.push(Symbol {
                                 name: sub_name,
                                 guards,
@@ -407,16 +463,19 @@ impl<'a> TranslationUnitState<'a> {
     }
 }
 
-fn reduce_guard_set(existing: Rc<[PreprocessorGuard]>, new: Rc<[PreprocessorGuard]>) -> Rc<[PreprocessorGuard]> {
+fn reduce_guard_set(
+    existing: Rc<[PreprocessorGuard]>,
+    new: Rc<[PreprocessorGuard]>,
+) -> Rc<[PreprocessorGuard]> {
     if existing.is_empty() {
         return existing;
     }
 
-    let reduced_index = existing.iter().zip(new.iter())
+    let reduced_index = existing
+        .iter()
+        .zip(new.iter())
         .enumerate()
-        .filter(|(_, (existing, new))| {
-            **existing != **new
-        })
+        .filter(|(_, (existing, new))| **existing != **new)
         .map(|(i, _)| i)
         .next();
 
@@ -427,17 +486,32 @@ fn reduce_guard_set(existing: Rc<[PreprocessorGuard]>, new: Rc<[PreprocessorGuar
     }
 }
 
-fn expand_functional_macro(candidate: MacroExpansionCandidate, name: &str, parameters: &MacroParameters, replacement: &[Token], tokens: &mut Vec<Token>) -> anyhow::Result<()> {
+fn expand_functional_macro(
+    candidate: MacroExpansionCandidate,
+    name: &str,
+    parameters: &MacroParameters,
+    replacement: &[Token],
+    tokens: &mut Vec<Token>,
+) -> anyhow::Result<()> {
     let Some(provided_parameters) = candidate.parameters else {
-        return Err(anyhow::anyhow!("Macro {} was used, but no parameters were provided", name));
+        return Err(anyhow::anyhow!(
+            "Macro {} was used, but no parameters were provided",
+            name
+        ));
     };
 
     if provided_parameters.len() > parameters.names.len() && !parameters.variadic {
-        return Err(anyhow::anyhow!("Macro {} was used with too many parameters", name));
+        return Err(anyhow::anyhow!(
+            "Macro {} was used with too many parameters",
+            name
+        ));
     }
 
     if provided_parameters.len() < parameters.names.len() {
-        return Err(anyhow::anyhow!("Macro {} was used with too few parameters", name));
+        return Err(anyhow::anyhow!(
+            "Macro {} was used with too few parameters",
+            name
+        ));
     }
 
     let lookup_name = |name: &str| -> Option<&[Token]> {
@@ -470,11 +544,9 @@ fn expand_functional_macro(candidate: MacroExpansionCandidate, name: &str, param
                         tokens.append(&mut parameter_set.clone());
                         index += 1;
                     }
-                }
-                else if let Some(parameter_set) = lookup_name(identifier) {
+                } else if let Some(parameter_set) = lookup_name(identifier) {
                     tokens.extend_from_slice(parameter_set);
-                }
-                else {
+                } else {
                     tokens.push(token.clone());
                 }
             }
@@ -483,7 +555,6 @@ fn expand_functional_macro(candidate: MacroExpansionCandidate, name: &str, param
             }
         }
     }
-
 
     Ok(())
 }

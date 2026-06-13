@@ -1,8 +1,8 @@
+use crate::config::config::ConfigIncludePath;
+use regex::Regex;
+use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use serde::Deserialize;
-use regex::Regex;
-use crate::config::config::ConfigIncludePath;
 
 #[derive(Debug, Deserialize, Default)]
 pub struct FileConfig {
@@ -18,7 +18,7 @@ pub struct FileConfig {
 #[derive(Debug, Deserialize, Default)]
 pub struct FileModuleConfig {
     pub name: Option<String>,
-    pub output: Option<PathBuf>
+    pub output: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -40,7 +40,7 @@ pub struct FileMacroConfig {
 
     #[serde(default)]
     pub explicit_macros: Vec<String>,
-    
+
     #[serde(default)]
     pub implementation_macros: Vec<String>,
 }

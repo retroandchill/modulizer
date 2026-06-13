@@ -1,9 +1,9 @@
-use std::fmt::Write as FmtWrite;
-use std::io::Write;
 use crate::config::{Config, ConfigIncludePath};
 use crate::parser::translation::TranslationUnit;
 use crate::writer::IndentedWriter;
 use crate::writer::symbols::SymbolWriteContext;
+use std::fmt::Write as FmtWrite;
+use std::io::Write;
 
 impl Config {
     pub fn output_module(&self) -> anyhow::Result<()> {
@@ -20,7 +20,9 @@ impl Config {
                 }
                 ConfigIncludePath::Conditional { path, if_defined } => {
                     let header_file = path.display();
-                    includes.write_fmt(format_args!("#ifdef {if_defined}\n#include <{header_file}>\n#endif\n"))?;
+                    includes.write_fmt(format_args!(
+                        "#ifdef {if_defined}\n#include <{header_file}>\n#endif\n"
+                    ))?;
                 }
             }
         }

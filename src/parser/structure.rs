@@ -54,8 +54,7 @@ impl Display for TokenNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             TokenNode::Token(token) => write!(f, "{}", token),
-            TokenNode::Group(group) =>
-            match group.delimiter {
+            TokenNode::Group(group) => match group.delimiter {
                 Delimiter::Parentheses => write!(f, "(...)"),
                 Delimiter::Braces => write!(f, "{{...}}"),
                 Delimiter::Brackets => write!(f, "[...]"),
@@ -99,8 +98,7 @@ fn collect_until(
                     children: Rc::from(children),
                     terminated,
                 });
-                if node.is_attribute()
-                {
+                if node.is_attribute() {
                     continue;
                 }
                 result.push(node);

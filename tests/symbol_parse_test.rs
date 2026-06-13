@@ -1,8 +1,8 @@
 use logos::Logos;
+use modulizer::parser::grammar::{GuardedToken, Token};
+use modulizer::parser::symbols::{Symbol, SymbolKind, parse_symbols};
 use std::assert_matches;
 use std::rc::Rc;
-use modulizer::parser::grammar::{GuardedToken, Token};
-use modulizer::parser::symbols::{parse_symbols, Symbol, SymbolKind};
 
 fn lex(source: &str) -> Vec<Token> {
     Token::lexer(source)
@@ -433,7 +433,19 @@ fn can_parse_operator_overloads() {
     let result = parse_symbols(&guarded);
     assert!(result.is_ok());
     let symbols = result.unwrap();
-    assert_declarations(&symbols, &["operator+", "operator new", "operator new[]", "operator delete", "operator delete[]", "operator co_await", "operator[]", "operator()"]);
+    assert_declarations(
+        &symbols,
+        &[
+            "operator+",
+            "operator new",
+            "operator new[]",
+            "operator delete",
+            "operator delete[]",
+            "operator co_await",
+            "operator[]",
+            "operator()",
+        ],
+    );
 }
 
 #[test]

@@ -1,10 +1,10 @@
-use std::io::{BufRead, Write};
+use std::io::Write;
 
 pub struct IndentedWriter<W: Write> {
     writer: W,
     indent_level: u32,
     indent_size: u32,
-    wrote_indent: bool
+    wrote_indent: bool,
 }
 
 impl<W: Write> IndentedWriter<W> {
@@ -17,7 +17,7 @@ impl<W: Write> IndentedWriter<W> {
             writer,
             indent_level: 0,
             indent_size,
-            wrote_indent: false
+            wrote_indent: false,
         }
     }
 
@@ -48,7 +48,7 @@ impl<W: Write> IndentedWriter<W> {
     }
 
     pub fn write_fmt_unindented(&mut self, fmt: std::fmt::Arguments) -> std::io::Result<()> {
-         let formatted = fmt.to_string();
+        let formatted = fmt.to_string();
         self.write_all_unindented(formatted.as_bytes())
     }
 

@@ -52,5 +52,4 @@ pub struct CliArgs {
     /// Add a symbol to export.
     #[arg(long = "include-symbol")]
     pub include_symbols: Vec<String>,
-    
 }

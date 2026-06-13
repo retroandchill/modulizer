@@ -1,9 +1,9 @@
+use crate::parser::preprocessor::ConditionalDirective;
 use logos::{Lexer, Logos};
 use std::fmt;
 use std::fmt::Formatter;
 use std::rc::Rc;
 use ustr::Ustr;
-use crate::parser::preprocessor::ConditionalDirective;
 
 #[derive(Logos, Clone, Debug, PartialEq)]
 pub enum Token {
@@ -144,10 +144,10 @@ pub enum Token {
 
     #[token("long long")]
     LongLong,
-    
+
     #[token("float")]
     Float,
-    
+
     #[token("double")]
     Double,
 
@@ -165,13 +165,13 @@ pub enum Token {
 
     #[token("char32_t")]
     Char32,
-    
+
     #[token("new")]
     New,
-    
+
     #[token("delete")]
     Delete,
-    
+
     #[token("co_await")]
     CoAwait,
 
@@ -197,7 +197,7 @@ pub enum Token {
 
     #[token("->")]
     Arrow,
-    
+
     #[token("==")]
     EqualEqual,
 
@@ -288,7 +288,14 @@ pub enum Token {
 
 impl Token {
     pub fn is_trivial(&self) -> bool {
-        matches!(self, Token::Whitespace | Token::NewLine | Token::Continuation | Token::LineComment | Token::BlockComment)
+        matches!(
+            self,
+            Token::Whitespace
+                | Token::NewLine
+                | Token::Continuation
+                | Token::LineComment
+                | Token::BlockComment
+        )
     }
 }
 
@@ -336,7 +343,7 @@ impl fmt::Display for Token {
                 Token::Noexcept => "noexcept",
                 Token::Final => "final",
                 Token::Whitespace => " ",
-                | Token::StringLiteral(str)
+                Token::StringLiteral(str)
                 | Token::CharacterLiteral(str)
                 | Token::NumberLiteral(str)
                 | Token::Identifier(str) => str,
@@ -395,7 +402,6 @@ impl fmt::Display for Token {
     }
 }
 
-
 fn parse_string_literal(lex: &mut Lexer<Token>) -> Option<Ustr> {
     let remainder = lex.remainder();
     let bytes = remainder.as_bytes();
@@ -423,7 +429,7 @@ fn parse_string_literal(lex: &mut Lexer<Token>) -> Option<Ustr> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PreprocessorGuard {
     Conditional(ConditionalDirective),
-    Else
+    Else,
 }
 
 #[derive(Debug, Clone)]
@@ -441,7 +447,8 @@ impl GuardedTokens {
     }
 
     pub fn append(&mut self, tokens: impl Iterator<Item = Token>) {
-        self.tokens.extend(tokens.filter(|token| !token.is_trivial()));
+        self.tokens
+            .extend(tokens.filter(|token| !token.is_trivial()));
     }
 }
 
@@ -468,15 +475,15 @@ impl<'a> Iterator for GuardedTokenIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(index) = self.index {
             self.index = Some(index + 1);
-        }
-        else {
+        } else {
             self.index = Some(0);
         }
-        
+
         let index = self.index.unwrap();
-        self.tokens.tokens.get(index)
-            .map(|token| GuardedToken { guards: self.tokens.guards.clone(), token: token.clone() })
-        
+        self.tokens.tokens.get(index).map(|token| GuardedToken {
+            guards: self.tokens.guards.clone(),
+            token: token.clone(),
+        })
     }
 }
 
@@ -485,6 +492,9 @@ impl<'a> IntoIterator for &'a GuardedTokens {
     type IntoIter = GuardedTokenIterator<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        Self::IntoIter { tokens: self, index: None }
+        Self::IntoIter {
+            tokens: self,
+            index: None,
+        }
     }
 }

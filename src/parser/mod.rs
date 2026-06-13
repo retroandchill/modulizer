@@ -1,7 +1,7 @@
-pub mod grammar;
-pub mod translation;
-pub mod symbols;
-pub mod preprocessor;
 mod common;
+pub mod grammar;
 mod macros;
+pub mod preprocessor;
 mod structure;
+pub mod symbols;
+pub mod translation;

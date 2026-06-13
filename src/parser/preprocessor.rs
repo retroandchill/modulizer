@@ -1,11 +1,14 @@
-use crate::parser::common::{identifier, newline, non_breaking_whitespace, non_empty_rest_of_line, optional_newline, rest_of_line, whitespace, PreprocessorError};
+use crate::parser::common::{
+    PreprocessorError, identifier, newline, non_breaking_whitespace, non_empty_rest_of_line,
+    optional_newline, rest_of_line, whitespace,
+};
 use crate::parser::grammar::Token;
+use chumsky::IterParser;
 use chumsky::error::Rich;
 use chumsky::input::ValueInput;
 use chumsky::primitive::{any, choice, end, just};
 use chumsky::span::SimpleSpan;
-use chumsky::IterParser;
-use chumsky::{extra, Parser};
+use chumsky::{Parser, extra};
 use std::fmt::Write;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -14,7 +17,7 @@ use ustr::Ustr;
 #[derive(Debug, Clone)]
 pub struct IncludeDirective {
     pub tokens: Vec<Token>,
-    pub path: IncludePath
+    pub path: IncludePath,
 }
 
 #[derive(Debug, Clone)]
@@ -34,7 +37,7 @@ pub struct DefineDirective {
 #[derive(Debug, Clone)]
 pub struct MacroParameters {
     pub names: Rc<[Ustr]>,
-    pub variadic: bool
+    pub variadic: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -44,24 +47,12 @@ pub struct UndefDirective {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConditionalDirective {
-    If {
-        expression: Rc<[Token]>,
-    },
-    Ifdef {
-        name: Ustr,
-    },
-    Ifndef {
-        name: Ustr,
-    },
-    Elif {
-        expression: Rc<[Token]>,
-    },
-    Elifdef {
-        name: Ustr,
-    },
-    Elifndef {
-        name: Ustr,
-    },
+    If { expression: Rc<[Token]> },
+    Ifdef { name: Ustr },
+    Ifndef { name: Ustr },
+    Elif { expression: Rc<[Token]> },
+    Elifdef { name: Ustr },
+    Elifndef { name: Ustr },
 }
 
 #[derive(Debug, Clone)]
@@ -79,7 +70,6 @@ pub enum DirectiveStatement {
 pub struct CodeLine {
     pub tokens: Vec<Token>,
 }
-
 
 #[derive(Debug, Clone)]
 pub enum PreprocessorStatement {
@@ -100,16 +90,18 @@ where
         .ignored()
 }
 
-fn angle_include<'tok, I>(
-) -> impl Parser<'tok, I, IncludeDirective, extra::Err<Rich<'tok, Token>>>
+fn angle_include<'tok, I>() -> impl Parser<'tok, I, IncludeDirective, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     just(Token::Less)
-        .ignore_then(any().filter(|token| !matches!(token, Token::NewLine | Token::Greater))
-            .repeated()
-            .collect())
+        .ignore_then(
+            any()
+                .filter(|token| !matches!(token, Token::NewLine | Token::Greater))
+                .repeated()
+                .collect(),
+        )
         .then_ignore(just(Token::Greater))
         .then_ignore(non_breaking_whitespace().or_not())
         .then_ignore(optional_newline())
@@ -119,15 +111,17 @@ where
                 path.write_fmt(format_args!("{}", token)).unwrap();
             }
 
-            IncludeDirective { tokens, path: IncludePath::System(PathBuf::from(path)) }
+            IncludeDirective {
+                tokens,
+                path: IncludePath::System(PathBuf::from(path)),
+            }
         })
 }
 
-fn quote_include<'tok, I>(
-) -> impl Parser<'tok, I, IncludeDirective, extra::Err<Rich<'tok, Token>>>
+fn quote_include<'tok, I>() -> impl Parser<'tok, I, IncludeDirective, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     any()
         .filter(|token| matches!(token, Token::StringLiteral(_)))
@@ -137,17 +131,20 @@ where
             let Token::StringLiteral(path) = &token else {
                 panic!("Expected string literal");
             };
-            
+
             let quote_span = path.trim_matches('"');
             let escaped = deescape_string(quote_span);
-            IncludeDirective { tokens: vec![token], path: IncludePath::Local(PathBuf::from(escaped)) }
+            IncludeDirective {
+                tokens: vec![token],
+                path: IncludePath::Local(PathBuf::from(escaped)),
+            }
         })
 }
 
 fn deescape_string(input: &str) -> String {
     let mut result = String::new();
     let mut chars = input.chars();
-    
+
     while let Some(c) = chars.next() {
         if c == '\\' {
             match chars.next() {
@@ -159,80 +156,84 @@ fn deescape_string(input: &str) -> String {
                 Some(other) => {
                     result.push('\\');
                     result.push(other);
-                },
-                None => break
+                }
+                None => break,
             }
-        }
-        else {
+        } else {
             result.push(c);
         }
     }
-    
+
     result
 }
 
 fn macro_include<'tok, I>() -> impl Parser<'tok, I, IncludeDirective, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     non_breaking_whitespace()
-        .ignore_then(any()
-            .filter(|token| !matches!(token, Token::NewLine))
-            .repeated()
-            .collect())
+        .ignore_then(
+            any()
+                .filter(|token| !matches!(token, Token::NewLine))
+                .repeated()
+                .collect(),
+        )
         .then_ignore(optional_newline())
-        .map(|tokens| IncludeDirective { tokens, path: IncludePath::Macro })
-
+        .map(|tokens| IncludeDirective {
+            tokens,
+            path: IncludePath::Macro,
+        })
 }
 
-fn include_statement<'tok, I>(
-) -> impl Parser<'tok, I, IncludeDirective, extra::Err<Rich<'tok, Token>>>
+fn include_statement<'tok, I>()
+-> impl Parser<'tok, I, IncludeDirective, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
-    non_breaking_whitespace()
-        .ignore_then(choice((angle_include(), quote_include(), macro_include())))
-
+    non_breaking_whitespace().ignore_then(choice((
+        angle_include(),
+        quote_include(),
+        macro_include(),
+    )))
 }
 
-pub fn parse_include_expansion(tokens: &[Token]) -> Result<IncludeDirective, PreprocessorError<'_>> {
+pub fn parse_include_expansion(
+    tokens: &[Token],
+) -> Result<IncludeDirective, PreprocessorError<'_>> {
     include_statement()
         .then_ignore(whitespace().or_not())
         .then_ignore(end())
-        .parse(tokens).into_result()
+        .parse(tokens)
+        .into_result()
         .map_err(|err| PreprocessorError { errors: err })
 }
 
-fn include_directive<'tok, I>(
-) -> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
+fn include_directive<'tok, I>()
+-> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     directive_head("include")
         .ignore_then(include_statement())
         .map(DirectiveStatement::Include)
-
 }
 
-fn macro_parameter_name<'tok, I>(
-) -> impl Parser<'tok, I, Option<Ustr>, extra::Err<Rich<'tok, Token>>>
+fn macro_parameter_name<'tok, I>()
+-> impl Parser<'tok, I, Option<Ustr>, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>,
 {
-    choice((
-        just(Token::Ellipsis).to(None),
-        identifier().map(Some),
-    ))
+    choice((just(Token::Ellipsis).to(None), identifier().map(Some)))
 }
 
-fn macro_parameters<'tok, I>(
-) -> impl Parser<'tok, I, MacroParameters, extra::Err<Rich<'tok, Token>>>
+fn macro_parameters<'tok, I>()
+-> impl Parser<'tok, I, MacroParameters, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     just(Token::LParen)
         .ignore_then(
@@ -257,16 +258,16 @@ where
 
             MacroParameters {
                 names: Rc::from(names),
-                variadic
+                variadic,
             }
         })
 }
 
-fn define_directive<'tok, I>(
-) -> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
+fn define_directive<'tok, I>()
+-> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     directive_head("define")
         .ignore_then(non_breaking_whitespace())
@@ -284,13 +285,13 @@ where
         })
 }
 
-fn macro_definition_name<'tok, I>() -> impl Parser<'tok, I, (Ustr, Option<MacroParameters>), extra::Err<Rich<'tok, Token>>>
+fn macro_definition_name<'tok, I>()
+-> impl Parser<'tok, I, (Ustr, Option<MacroParameters>), extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
-    identifier().
-        then(macro_parameters().or_not())
+    identifier().then(macro_parameters().or_not())
 }
 
 fn trim_replacement(tokens: &[Token]) -> Rc<[Token]> {
@@ -313,19 +314,20 @@ fn trim_replacement(tokens: &[Token]) -> Rc<[Token]> {
     Rc::from(result)
 }
 
-pub fn get_macro_definition_and_parameters(tokens: &[Token]) -> Result<(Ustr, Option<MacroParameters>), PreprocessorError<'_>> {
+pub fn get_macro_definition_and_parameters(
+    tokens: &[Token],
+) -> Result<(Ustr, Option<MacroParameters>), PreprocessorError<'_>> {
     macro_definition_name()
-        .parse(tokens).into_result()
-        .map_err(|errs| PreprocessorError {
-            errors: errs,
-        })
+        .parse(tokens)
+        .into_result()
+        .map_err(|errs| PreprocessorError { errors: errs })
 }
 
-fn undef_directive<'tok, I>(
-) -> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
+fn undef_directive<'tok, I>()
+-> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     directive_head("undef")
         .ignore_then(non_breaking_whitespace())
@@ -335,26 +337,27 @@ where
         .map(|name| DirectiveStatement::Undef(UndefDirective { name }))
 }
 
-fn if_directive<'tok, I>(
-) -> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
+fn if_directive<'tok, I>() -> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     directive_head("if")
         .ignore_then(non_breaking_whitespace())
         .ignore_then(rest_of_line())
         .then_ignore(optional_newline())
         .map(|expression| {
-            DirectiveStatement::Conditional(ConditionalDirective::If { expression: Rc::from(expression) })
+            DirectiveStatement::Conditional(ConditionalDirective::If {
+                expression: Rc::from(expression),
+            })
         })
 }
 
-fn ifdef_directive<'tok, I>(
-) -> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
+fn ifdef_directive<'tok, I>()
+-> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     directive_head("ifdef")
         .ignore_then(non_breaking_whitespace())
@@ -364,11 +367,11 @@ where
         .map(|name| DirectiveStatement::Conditional(ConditionalDirective::Ifdef { name }))
 }
 
-fn ifndef_directive<'tok, I>(
-) -> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
+fn ifndef_directive<'tok, I>()
+-> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     directive_head("ifndef")
         .ignore_then(non_breaking_whitespace())
@@ -378,26 +381,28 @@ where
         .map(|name| DirectiveStatement::Conditional(ConditionalDirective::Ifndef { name }))
 }
 
-fn elif_directive<'tok, I>(
-) -> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
+fn elif_directive<'tok, I>()
+-> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     directive_head("elif")
         .ignore_then(non_breaking_whitespace())
         .ignore_then(rest_of_line())
         .then_ignore(optional_newline())
         .map(|expression| {
-            DirectiveStatement::Conditional(ConditionalDirective::Elif { expression: Rc::from(expression) })
+            DirectiveStatement::Conditional(ConditionalDirective::Elif {
+                expression: Rc::from(expression),
+            })
         })
 }
 
-fn elifdef_directive<'tok, I>(
-) -> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
+fn elifdef_directive<'tok, I>()
+-> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     directive_head("elifdef")
         .ignore_then(non_breaking_whitespace())
@@ -407,11 +412,11 @@ where
         .map(|name| DirectiveStatement::Conditional(ConditionalDirective::Elifdef { name }))
 }
 
-fn elifndef_directive<'tok, I>(
-) -> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
+fn elifndef_directive<'tok, I>()
+-> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     directive_head("elifndef")
         .ignore_then(non_breaking_whitespace())
@@ -421,11 +426,11 @@ where
         .map(|name| DirectiveStatement::Conditional(ConditionalDirective::Elifndef { name }))
 }
 
-fn else_directive<'tok, I>(
-) -> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
+fn else_directive<'tok, I>()
+-> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     directive_head("else")
         .then_ignore(rest_of_line())
@@ -433,11 +438,11 @@ where
         .to(DirectiveStatement::Else)
 }
 
-fn endif_directive<'tok, I>(
-) -> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
+fn endif_directive<'tok, I>()
+-> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     directive_head("endif")
         .then_ignore(rest_of_line())
@@ -445,11 +450,11 @@ where
         .to(DirectiveStatement::Endif)
 }
 
-fn other_directive<'tok, I>(
-) -> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
+fn other_directive<'tok, I>()
+-> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     non_breaking_whitespace()
         .ignore_then(just(Token::Hash))
@@ -458,16 +463,14 @@ where
         .then_ignore(non_breaking_whitespace())
         .then(rest_of_line())
         .then_ignore(optional_newline())
-        .map(|_| {
-            DirectiveStatement::Other
-        })
+        .map(|_| DirectiveStatement::Other)
 }
 
-fn directive_statement<'tok, I>(
-) -> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
+fn directive_statement<'tok, I>()
+-> impl Parser<'tok, I, DirectiveStatement, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     choice((
         include_directive(),
@@ -485,48 +488,43 @@ where
     ))
 }
 
-fn blank_line<'tok, I>(
-) -> impl Parser<'tok, I, PreprocessorStatement, extra::Err<Rich<'tok, Token>>>
+fn blank_line<'tok, I>()
+-> impl Parser<'tok, I, PreprocessorStatement, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>,
 {
     newline().to(PreprocessorStatement::Code(CodeLine { tokens: Vec::new() }))
 }
 
-fn code_line<'tok, I>(
-) -> impl Parser<'tok, I, CodeLine, extra::Err<Rich<'tok, Token>>>
+fn code_line<'tok, I>() -> impl Parser<'tok, I, CodeLine, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     non_empty_rest_of_line()
         .then_ignore(optional_newline())
-        .map(|tokens| CodeLine { tokens: tokens.to_vec() })
+        .map(|tokens| CodeLine {
+            tokens: tokens.to_vec(),
+        })
 }
 
-fn statement<'tok, I>(
-) -> impl Parser<'tok, I, PreprocessorStatement, extra::Err<Rich<'tok, Token>>>
+fn statement<'tok, I>() -> impl Parser<'tok, I, PreprocessorStatement, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     choice((
         directive_statement().map(PreprocessorStatement::Directive),
         blank_line(),
         code_line().map(PreprocessorStatement::Code),
-        ))
+    ))
 }
 
-fn statements<'tok, I>(
-) -> impl Parser<
-    'tok,
-    I,
-    Vec<PreprocessorStatement>,
-    extra::Err<Rich<'tok, Token>>,
->
+fn statements<'tok, I>()
+-> impl Parser<'tok, I, Vec<PreprocessorStatement>, extra::Err<Rich<'tok, Token>>>
 where
     I: ValueInput<'tok, Token = Token, Span = SimpleSpan>
-    + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
+        + chumsky::input::SliceInput<'tok, Slice = &'tok [Token]>,
 {
     statement().repeated().collect()
 }
@@ -534,10 +532,10 @@ where
 pub fn collect_statements(
     tokens: &[Token],
 ) -> Result<Vec<PreprocessorStatement>, PreprocessorError<'_>> {
-    let raw_statements = statements().parse(tokens).into_result()
-        .map_err(|errs| PreprocessorError {
-            errors: errs,
-        })?;
+    let raw_statements = statements()
+        .parse(tokens)
+        .into_result()
+        .map_err(|errs| PreprocessorError { errors: errs })?;
 
     let mut statements = Vec::with_capacity(raw_statements.len());
     for raw_statement in raw_statements {
@@ -546,8 +544,7 @@ pub fn collect_statements(
                 if let Some(PreprocessorStatement::Code(previous_code)) = statements.last_mut() {
                     previous_code.tokens.push(Token::NewLine);
                     previous_code.tokens.append(&mut code.tokens);
-                }
-                else {
+                } else {
                     statements.push(PreprocessorStatement::Code(code));
                 }
             }
