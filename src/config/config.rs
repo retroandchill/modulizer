@@ -1,6 +1,7 @@
 use crate::config::cli::CliArgs;
 use crate::config::file::FileConfig;
 use clap::Parser;
+use derive_builder::Builder;
 use itertools::Itertools;
 use regex::Regex;
 use serde::Deserialize;
@@ -8,7 +9,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use ustr::Ustr;
 
-#[derive(Debug)]
+#[derive(Debug, Default, Builder)]
 pub struct Config {
     pub name: String,
     pub output_path: PathBuf,
