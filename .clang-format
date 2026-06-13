@@ -1,0 +1,34 @@
+---
+Language: Cpp
+BasedOnStyle: Microsoft
+ColumnLimit: 120
+MaxEmptyLinesToKeep: 1
+TabWidth: 4
+IndentWidth: 4
+SortIncludes: CaseInsensitive
+AllowShortFunctionsOnASingleLine: None
+NamespaceIndentation: All
+IncludeBlocks: Regroup
+BreakBeforeConceptDeclarations: true
+AlwaysBreakTemplateDeclarations : Yes
+
+BreakBeforeBraces: Allman
+BinPackParameters: false
+BinPackArguments: false
+AllowShortLambdasOnASingleLine: Inline
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+
+UseTab: Never
+IndentCaseLabels: true
+IndentCaseBlocks: true
+IndentGotoLabels: false
+
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceBeforeCtorInitializerColon: true
+SpaceInEmptyParentheses: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+SpacesInAngles: false
+SpaceAroundPointerQualifiers: Default
