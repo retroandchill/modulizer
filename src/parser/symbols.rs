@@ -2,7 +2,6 @@ use crate::parser::grammar::{GuardedToken, PreprocessorGuard, Token};
 use crate::parser::structure::{Delimiter, TokenGroup, TokenNode, collect_token_nodes};
 use arraystring::ArrayString;
 use arraystring::typenum::U25;
-use chumsky::Parser;
 use itertools::Itertools;
 use std::fmt;
 use std::fmt::Write;

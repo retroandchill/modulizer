@@ -7,9 +7,7 @@ use crate::ffi::core::{
 use crate::ffi::strings::StringView;
 use crate::writer::cpp_output::GenerationResult;
 use clap::Parser;
-use itertools::Itertools;
 use regex::Regex;
-use std::ffi::{CStr, CString, c_char};
 use std::path::PathBuf;
 use std::string::FromUtf8Error;
 use ustr::Ustr;
