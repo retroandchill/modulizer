@@ -1,10 +1,15 @@
+use crate::cli::args::CliArgs;
+use crate::config::file::FileConfig;
 use crate::config::{IncludePath, OptionsBuilder};
 use crate::ffi::core::{
     collapse_to_ustr_set, collapse_to_vec, expect_success, expect_success_create,
 };
 use crate::ffi::strings::StringView;
 use crate::writer::cpp_output::GenerationResult;
+use clap::Parser;
+use itertools::Itertools;
 use regex::Regex;
+use std::ffi::{CStr, CString, c_char};
 use std::path::PathBuf;
 use std::string::FromUtf8Error;
 use ustr::Ustr;
@@ -361,6 +366,43 @@ pub extern "C" fn modulizer_builder_include_symbols(
     };
     expect_success(|| {
         builder.expand_macros_from_definition(collapse_to_ustr_set(names, count)?);
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn modulizer_builder_from_config_file(
+    builder: *mut OptionsBuilder,
+    path: StringView,
+) -> bool {
+    let builder = unsafe {
+        assert!(!builder.is_null());
+        &mut (*builder)
+    };
+    expect_success(|| {
+        builder.apply_file_config(FileConfig::load(PathBuf::try_from(path)?)?);
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn modulizer_builder_from_cli_args(
+    builder: *mut OptionsBuilder,
+    argv: *const StringView,
+    argc: usize,
+) -> bool {
+    let builder = unsafe {
+        assert!(!builder.is_null());
+        &mut (*builder)
+    };
+
+    expect_success(|| {
+        let argv = unsafe { std::slice::from_raw_parts(argv, argc) };
+        let args = argv
+            .into_iter()
+            .map(|arg| String::try_from(*arg))
+            .collect::<Result<Vec<_>, _>>()?;
+        builder.apply_cli_args(CliArgs::try_parse_from(args)?)?;
         Ok(())
     })
 }

@@ -132,6 +132,13 @@ extern "C"
                                                                 const Modulizer_StringView *names,
                                                                 size_t count);
 
+    extern MODULIZER_API bool modulizer_builder_from_config_file(const Modulizer_GenerationResult *result,
+                                                                 Modulizer_StringView path);
+
+    extern MODULIZER_API bool modulizer_builder_from_cli_args(const Modulizer_GenerationResult *result,
+                                                              const Modulizer_StringView *argv,
+                                                              size_t argc);
+
     extern MODULIZER_API Modulizer_GenerationResult *modulizer_generate(const Modulizer_Builder *builder);
 
     extern MODULIZER_API void modulizer_generation_result_destroy(Modulizer_GenerationResult *result);

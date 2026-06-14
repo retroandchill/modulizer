@@ -1,8 +1,6 @@
-use crate::cli::args::{ApplyCliArgs, CliArgs};
 use clap::Parser;
+use modulizer::cli::args::CliArgs;
 use modulizer::config::OptionsBuilder;
-
-mod cli;
 
 fn main() -> anyhow::Result<()> {
     let args = CliArgs::try_parse()?;

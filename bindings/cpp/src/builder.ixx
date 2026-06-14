@@ -161,6 +161,23 @@ namespace modulizer
             return std::forward<Self>(self);
         }
 
+        template <NonConst Self>
+        decltype(auto) from_config_file(this Self &&self, const std::string_view path)
+        {
+            throw_if_false(modulizer_builder_from_config_file(self.builder.get(), to_c(path)));
+            return std::forward<Self>(self);
+        }
+
+        template <NonConst Self, ValidStringViewableRange Range>
+        decltype(auto) from_cli_args(this Self &&self, Range &&args)
+        {
+            auto name_vector = std::forward<Range>(args) |
+                               std::views::transform([](const auto &name) { return to_c(name); }) |
+                               std::ranges::to<std::vector>();
+            throw_if_false(modulizer_builder_from_cli_args(self.builder.get(), name_vector.data(), name_vector.size()));
+            return std::forward<Self>(self);
+        }
+
       private:
         BuilderPtr builder{modulizer_builder_create()};
     };
