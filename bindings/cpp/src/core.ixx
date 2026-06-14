@@ -17,7 +17,7 @@ namespace modulizer
         using std::runtime_error::runtime_error;
     };
 
-    constexpr void throw_if_invalid(const bool result)
+    constexpr void throw_if_false(const bool result)
     {
         if (!result)
         {
@@ -26,7 +26,14 @@ namespace modulizer
     }
 
     template <typename T>
-    constexpr void throw_if_invalid(T *) = delete;
+    constexpr T *throw_if_null(T *ptr)
+    {
+        if (ptr == nullptr)
+        {
+            throw Error{modulizer_get_last_error()};
+        }
+        return ptr;
+    }
 
     template <typename... Functors>
     struct Overload : Functors...
@@ -40,6 +47,11 @@ namespace modulizer
     constexpr Modulizer_StringView to_c(std::string_view str)
     {
         return {str.data(), str.size()};
+    }
+
+    constexpr std::string_view from_c(Modulizer_StringView str)
+    {
+        return {str.data, str.length};
     }
 
     export struct IfdefInclude

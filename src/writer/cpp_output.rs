@@ -4,10 +4,16 @@ use crate::writer::IndentedWriter;
 use crate::writer::symbols::SymbolWriteContext;
 use std::fmt::Write as FmtWrite;
 use std::io::Write;
+use std::path::PathBuf;
+
+pub struct GenerationResult {
+    pub output_path: PathBuf,
+}
 
 impl Options {
-    pub fn output_module(&self) -> anyhow::Result<()> {
-        let file = std::fs::File::create(&self.output_path)?;
+    pub fn output_module(&self) -> anyhow::Result<GenerationResult> {
+        let output_path = std::path::absolute(&self.output_path)?;
+        let file = std::fs::File::create(&output_path)?;
         let mut writer = IndentedWriter::new(file);
 
         let mut includes = String::new();
@@ -52,6 +58,6 @@ impl Options {
         let mut symbol_context = SymbolWriteContext::new(&mut writer);
         symbol_context.emit_symbols(translation_unit.symbols())?;
 
-        Ok(())
+        Ok(GenerationResult { output_path })
     }
 }

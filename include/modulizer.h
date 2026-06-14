@@ -27,7 +27,8 @@ extern "C"
 #endif
 
     typedef struct Modulizer_Builder Modulizer_Builder;
-    typedef struct Modulizer_Options Modulizer_Options;
+
+    typedef struct Modulizer_GenerationResult Modulizer_GenerationResult;
 
     typedef struct Modulizer_StringView
     {
@@ -131,9 +132,12 @@ extern "C"
                                                                 const Modulizer_StringView *names,
                                                                 size_t count);
 
-    extern MODULIZER_API Modulizer_Options *modulizer_options_create(const Modulizer_Builder *builder);
+    extern MODULIZER_API Modulizer_GenerationResult *modulizer_generate(const Modulizer_Builder *builder);
 
-    extern MODULIZER_API void modulizer_options_destroy(Modulizer_Options *options);
+    extern MODULIZER_API void modulizer_generation_result_destroy(Modulizer_GenerationResult *result);
+
+    extern MODULIZER_API Modulizer_StringView
+    modulizer_generation_result_get_output_path(const Modulizer_GenerationResult *result);
 
 #ifdef __cplusplus
 }

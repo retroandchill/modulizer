@@ -2,7 +2,8 @@ set(MODULIZER_MODULES
         src/modulizer.ixx
         src/core.ixx
         src/native.ixx
-        src/options.ixx)
+        src/builder.ixx
+        src/generation_result.ixx)
 
 add_library(modulizer_cpp ${MODULIZER_MODULES})
 

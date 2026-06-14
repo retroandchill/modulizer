@@ -32,6 +32,12 @@ impl StringView {
     }
 }
 
+impl Into<StringView> for &str {
+    fn into(self) -> StringView {
+        StringView::new(self)
+    }
+}
+
 impl TryFrom<StringView> for Ustr {
     type Error = Utf8Error;
 

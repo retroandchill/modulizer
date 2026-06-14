@@ -1,9 +1,7 @@
 use crate::ffi::strings::StringView;
 use std::cell::RefCell;
-use std::convert::Infallible;
-use std::error::Error;
 use std::ffi::{CString, c_char};
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::Debug;
 use std::str::Utf8Error;
 use ustr::{Ustr, UstrSet};
 
@@ -14,17 +12,6 @@ thread_local! {
 #[derive(Debug)]
 pub struct FFIError {
     pub message: CString,
-}
-
-impl<E> From<E> for FFIError
-where
-    E: Error,
-{
-    fn from(error: E) -> Self {
-        Self {
-            message: CString::new(error.to_string()).unwrap(),
-        }
-    }
 }
 
 #[unsafe(no_mangle)]
@@ -38,21 +25,25 @@ pub extern "C" fn modulizer_get_last_error() -> *const c_char {
     })
 }
 
-pub fn expect_success(delegate: impl FnOnce() -> Result<(), FFIError>) -> bool {
+pub fn expect_success(delegate: impl FnOnce() -> anyhow::Result<()>) -> bool {
     match delegate() {
         Ok(_) => true,
         Err(error) => {
-            CURRENT_ERROR.replace(Some(error));
+            CURRENT_ERROR.replace(Some(FFIError {
+                message: CString::new(error.to_string()).unwrap(),
+            }));
             false
         }
     }
 }
 
-pub fn expect_success_create<T>(delegate: impl FnOnce() -> Result<Box<T>, FFIError>) -> *mut T {
+pub fn expect_success_create<T>(delegate: impl FnOnce() -> anyhow::Result<Box<T>>) -> *mut T {
     match delegate() {
         Ok(value) => Box::into_raw(value),
         Err(error) => {
-            CURRENT_ERROR.replace(Some(error));
+            CURRENT_ERROR.replace(Some(FFIError {
+                message: CString::new(error.to_string()).unwrap(),
+            }));
             std::ptr::null_mut()
         }
     }

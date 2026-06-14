@@ -1,22 +1,13 @@
-use crate::config::{IncludePath, Options, OptionsBuilder};
+use crate::config::{IncludePath, OptionsBuilder};
 use crate::ffi::core::{
     collapse_to_ustr_set, collapse_to_vec, expect_success, expect_success_create,
 };
 use crate::ffi::strings::StringView;
+use crate::writer::cpp_output::GenerationResult;
 use regex::Regex;
 use std::path::PathBuf;
 use std::string::FromUtf8Error;
 use ustr::Ustr;
-
-#[repr(C)]
-pub struct FFIOptionsBuilder {
-    inner: OptionsBuilder,
-}
-
-#[repr(C)]
-pub struct FFIOptions {
-    options: Options,
-}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -76,13 +67,13 @@ impl TryFrom<&FFIIncludePath> for IncludePath {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn modulizer_builder_create() -> *mut FFIOptionsBuilder {
+pub extern "C" fn modulizer_builder_create() -> *mut OptionsBuilder {
     let builder = OptionsBuilder::default();
-    Box::into_raw(Box::new(FFIOptionsBuilder { inner: builder }))
+    Box::into_raw(Box::new(builder))
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn modulizer_builder_destroy(builder: *mut FFIOptionsBuilder) {
+pub extern "C" fn modulizer_builder_destroy(builder: *mut OptionsBuilder) {
     if builder.is_null() {
         return;
     }
@@ -93,12 +84,12 @@ pub extern "C" fn modulizer_builder_destroy(builder: *mut FFIOptionsBuilder) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_set_name(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     name: StringView,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
 
     expect_success(|| {
@@ -109,12 +100,12 @@ pub extern "C" fn modulizer_builder_set_name(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_set_output_path(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     path: StringView,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
 
     expect_success(|| {
@@ -125,12 +116,12 @@ pub extern "C" fn modulizer_builder_set_output_path(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_library_header(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     path: *const FFIIncludePath,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
     let path = unsafe {
         assert!(!path.is_null());
@@ -145,13 +136,13 @@ pub extern "C" fn modulizer_builder_library_header(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_library_headers(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     paths: *const FFIIncludePath,
     count: usize,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
 
     expect_success(|| {
@@ -162,12 +153,12 @@ pub extern "C" fn modulizer_builder_library_headers(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_include_dir(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     path: StringView,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
 
     expect_success(|| {
@@ -178,13 +169,13 @@ pub extern "C" fn modulizer_builder_include_dir(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_include_dirs(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     paths: *const StringView,
     count: usize,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
 
     expect_success(|| {
@@ -197,12 +188,12 @@ pub extern "C" fn modulizer_builder_include_dirs(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_set_header_guard_format(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     format: StringView,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
 
     expect_success(|| {
@@ -213,12 +204,12 @@ pub extern "C" fn modulizer_builder_set_header_guard_format(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_expand_macro_from_definition(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     macro_name: StringView,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
 
     expect_success(|| {
@@ -229,13 +220,13 @@ pub extern "C" fn modulizer_builder_expand_macro_from_definition(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_expand_macros_from_definition(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     names: *const StringView,
     count: usize,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
 
     expect_success(|| {
@@ -246,12 +237,12 @@ pub extern "C" fn modulizer_builder_expand_macros_from_definition(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_explicit_macro(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     definition: StringView,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
 
     expect_success(|| {
@@ -262,13 +253,13 @@ pub extern "C" fn modulizer_builder_explicit_macro(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_explicit_macros(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     definitions: *const StringView,
     count: usize,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
     expect_success(|| {
         builder.expand_macros_from_definition(collapse_to_ustr_set(definitions, count)?);
@@ -278,12 +269,12 @@ pub extern "C" fn modulizer_builder_explicit_macros(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_implementation_macro(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     name: StringView,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
 
     expect_success(|| {
@@ -294,13 +285,13 @@ pub extern "C" fn modulizer_builder_implementation_macro(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_implementation_macros(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     names: *const StringView,
     count: usize,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
 
     expect_success(|| {
@@ -311,12 +302,12 @@ pub extern "C" fn modulizer_builder_implementation_macros(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_exclude_symbol(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     name: StringView,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
 
     expect_success(|| {
@@ -327,13 +318,13 @@ pub extern "C" fn modulizer_builder_exclude_symbol(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_exclude_symbols(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     names: *const StringView,
     count: usize,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
 
     expect_success(|| {
@@ -344,12 +335,12 @@ pub extern "C" fn modulizer_builder_exclude_symbols(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_include_symbol(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     name: StringView,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
 
     expect_success(|| {
@@ -360,13 +351,13 @@ pub extern "C" fn modulizer_builder_include_symbol(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn modulizer_builder_include_symbols(
-    builder: *mut FFIOptionsBuilder,
+    builder: *mut OptionsBuilder,
     names: *const StringView,
     count: usize,
 ) -> bool {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &mut (*builder).inner
+        &mut (*builder)
     };
     expect_success(|| {
         builder.expand_macros_from_definition(collapse_to_ustr_set(names, count)?);
@@ -375,24 +366,34 @@ pub extern "C" fn modulizer_builder_include_symbols(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn modulizer_options_create(builder: *const FFIOptionsBuilder) -> *mut FFIOptions {
+pub extern "C" fn modulizer_generate(builder: *const OptionsBuilder) -> *mut GenerationResult {
     let builder = unsafe {
         assert!(!builder.is_null());
-        &(*builder).inner
+        &(*builder)
     };
     expect_success_create(|| {
-        Ok(Box::from(FFIOptions {
-            options: builder.build()?,
-        }))
+        let options = builder.build()?;
+        Ok(Box::new(options.output_module()?))
     })
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn modulizer_options_destroy(options: *mut FFIOptions) {
-    if options.is_null() {
+pub extern "C" fn modulizer_generation_result_destroy(result: *mut GenerationResult) {
+    if result.is_null() {
         return;
     }
     unsafe {
-        drop(Box::from_raw(options));
+        drop(Box::from_raw(result));
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn modulizer_generation_result_get_output_path(
+    result: *const GenerationResult,
+) -> StringView {
+    let result = unsafe {
+        assert!(!result.is_null());
+        &(*result)
+    };
+    result.output_path.to_str().unwrap_or("").into()
 }
