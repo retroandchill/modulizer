@@ -1,4 +1,4 @@
-use crate::parser::grammar::tokens::Token;
+use crate::parser::grammar::Token;
 use chumsky::error::Rich;
 use chumsky::input::ValueInput;
 use chumsky::prelude::{SimpleSpan, any, end, just};
@@ -15,7 +15,7 @@ impl<'tok> fmt::Display for PreprocessorError<'tok> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
             f,
-            "One or more errors occurred (count: {}):",
+            "Multiple errors occurred (count: {}):",
             self.errors.len()
         )?;
         for err in &self.errors {

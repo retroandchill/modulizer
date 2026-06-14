@@ -1,5 +1,5 @@
 use logos::Logos;
-use modulizer::parser::grammar::tokens::{GuardedToken, Token};
+use modulizer::parser::grammar::{GuardedToken, Token};
 use modulizer::parser::symbols::{Symbol, SymbolKind, parse_symbols};
 use std::assert_matches;
 use std::rc::Rc;

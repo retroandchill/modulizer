@@ -1,5 +1,5 @@
 use crate::parser::common::{PreprocessorError, identifier, whitespace};
-use crate::parser::grammar::tokens::Token;
+use crate::parser::grammar::Token;
 use chumsky::error::Rich;
 use chumsky::input::ValueInput;
 use chumsky::prelude::SimpleSpan;

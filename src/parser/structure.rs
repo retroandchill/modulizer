@@ -1,4 +1,4 @@
-use crate::parser::grammar::tokens::{GuardedToken, Token};
+use crate::parser::grammar::{GuardedToken, Token};
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 

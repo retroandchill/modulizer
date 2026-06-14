@@ -1,4 +1,4 @@
-use crate::parser::grammar::preprocessor::ConditionalDirective;
+use crate::parser::preprocessor::ConditionalDirective;
 use logos::{Lexer, Logos};
 use std::fmt;
 use std::fmt::Formatter;

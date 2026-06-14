@@ -1,11 +1,11 @@
 use crate::config::Options;
-use crate::parser::grammar::preprocessor::{
+use crate::parser::grammar::{GuardedTokens, PreprocessorGuard, Token};
+use crate::parser::macros::{ExpandableSyntax, MacroExpansionCandidate, parse_expandable_syntax};
+use crate::parser::preprocessor::{
     ConditionalDirective, DefineDirective, DirectiveStatement, IncludeDirective, IncludePath,
     MacroParameters, PreprocessorStatement, collect_statements,
     get_macro_definition_and_parameters, parse_include_expansion,
 };
-use crate::parser::grammar::tokens::{GuardedTokens, PreprocessorGuard, Token};
-use crate::parser::macros::{ExpandableSyntax, MacroExpansionCandidate, parse_expandable_syntax};
 use crate::parser::symbols::{Namespace, Symbol, SymbolKind, parse_symbols};
 use itertools::Itertools;
 use logos::Logos;

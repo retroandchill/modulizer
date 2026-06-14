@@ -1,4 +1,4 @@
-use crate::parser::grammar::tokens::{GuardedToken, PreprocessorGuard, Token};
+use crate::parser::grammar::{GuardedToken, PreprocessorGuard, Token};
 use crate::parser::structure::{Delimiter, TokenGroup, TokenNode, collect_token_nodes};
 use arraystring::ArrayString;
 use arraystring::typenum::U25;
