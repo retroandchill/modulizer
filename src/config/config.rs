@@ -14,6 +14,7 @@ static MACRO_NAME_REGEX: Lazy<Regex> =
 #[derive(Debug, Default, Builder)]
 #[builder(build_fn(validate = "Self::validate"))]
 pub struct Options {
+    #[builder(default = "\"my_module\".to_string()")]
     pub name: String,
 
     #[builder(default = "self.default_output_path()?")]
