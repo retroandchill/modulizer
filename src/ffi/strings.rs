@@ -30,6 +30,10 @@ impl StringView {
     pub fn as_str(&self) -> Result<&str, Utf8Error> {
         unsafe { str::from_utf8(slice::from_raw_parts(self.data, self.length)) }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.length == 0
+    }
 }
 
 impl TryFrom<StringView> for Ustr {

@@ -1,5 +1,5 @@
-use crate::parser::grammar::PreprocessorGuard;
-use crate::parser::preprocessor::ConditionalDirective;
+use crate::parser::grammar::preprocessor::ConditionalDirective;
+use crate::parser::grammar::tokens::PreprocessorGuard;
 use crate::parser::symbols::{Symbol, SymbolKind};
 use crate::writer::IndentedWriter;
 use std::collections::VecDeque;
